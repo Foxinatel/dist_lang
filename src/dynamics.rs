@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub type Ident = String;
 
@@ -13,42 +13,65 @@ pub enum Term {
     Application(Application),
     IfElse(IfElse),
     LetBinding(LetBinding),
+    LetBoxBinding(LetBinding),
     Fix(Fix),
+    BinaryPrimitive(BinaryPrimitive),
 }
 
 #[derive(Clone, Debug)]
 pub struct Func {
     pub binding: Ident,
-    pub body: Rc<Term>,
+    pub body: Arc<Term>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Application {
-    pub func: Rc<Term>,
-    pub arg: Rc<Term>,
+    pub func: Arc<Term>,
+    pub arg: Arc<Term>,
 }
 
 #[derive(Clone, Debug)]
 pub struct IfElse {
-    pub cond: Rc<Term>,
-    pub if_true: Rc<Term>,
-    pub if_false: Rc<Term>,
+    pub cond: Arc<Term>,
+    pub if_true: Arc<Term>,
+    pub if_false: Arc<Term>,
 }
 
 #[derive(Clone, Debug)]
 pub struct LetBinding {
     pub binding: Ident,
-    pub expr: Rc<Term>,
-    pub body: Rc<Term>,
+    pub expr: Arc<Term>,
+    pub body: Arc<Term>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Fix {
     pub binding: Ident,
-    pub body: Rc<Term>,
+    pub body: Arc<Term>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Bx {
-    pub body: Rc<Term>,
+    pub body: Arc<Term>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Equal,
+    NotEqual,
+    LessThan,
+    GreaterThan,
+    LessThanOrEqual,
+    GreaterThanOrEqual,
+}
+
+#[derive(Clone, Debug)]
+pub struct BinaryPrimitive {
+    pub op: BinaryOp,
+    pub lhs: Arc<Term>,
+    pub rhs: Arc<Term>,
 }

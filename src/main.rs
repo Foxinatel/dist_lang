@@ -1,4 +1,6 @@
-use cek::State;
+#![feature(once_wait)]
+
+use cek::CEK;
 use dynamics::*;
 
 mod cek;
@@ -6,20 +8,30 @@ mod dynamics;
 
 fn main() {
     //  let a =
-    //      let c = 2 in (\x -> c)
+    //      let box c = box 2 in (\x -> c * 4)
     //  in
     //  let b =
     //      let c = 4 in (\x -> c)
     //  in
     //  a (b 6)
-    let mut state = State::new(Term::LetBinding(LetBinding {
+
+    rayon::ThreadPoolBuilder::new().build_global().unwrap();
+
+    let mut state = CEK::new(Term::LetBinding(LetBinding {
         binding: String::from("a"),
-        expr: Term::LetBinding(LetBinding {
+        expr: Term::LetBoxBinding(LetBinding {
             binding: String::from("c"),
-            expr: Term::IntLiteral(2).into(),
+            expr: Term::Box(Bx {
+                body: Term::IntLiteral(2).into(),
+            })
+            .into(),
             body: Term::Function(Func {
                 binding: String::from("x"),
-                body: Term::LocalVariable(String::from("c")).into(),
+                body: Term::BinaryPrimitive(BinaryPrimitive {
+                    op: BinaryOp::Multiply,
+                    lhs: Term::GlobalVariable(String::from("c")).into(),
+                    rhs: Term::IntLiteral(4).into(),
+                }).into(),
             })
             .into(),
         })
@@ -49,7 +61,7 @@ fn main() {
         .into(),
     }));
     println!("{state:#?}");
-    while !state.is_done() {
+    while state.finish().is_none() {
         state = state.step();
         println!("{state:#?}");
     }

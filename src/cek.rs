@@ -1,9 +1,11 @@
-use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
+
+use rayon::Yield;
 
 use crate::dynamics::*;
 
 #[derive(Clone, Debug)]
-enum Value {
+pub enum Value {
     Unit,
     Int(i64),
     Bool(bool),
@@ -50,11 +52,37 @@ impl Value {
 }
 
 #[derive(Clone, Debug)]
-struct MobileValue;
+pub struct MobileValue(Arc<OnceLock<Value>>);
 
 impl MobileValue {
-    pub fn compute(term: Bx) -> Self {
-        todo!()
+    pub fn compute(mut term: CEK) -> Self {
+        let val = Arc::new(OnceLock::new());
+
+        let v = val.clone();
+        rayon::spawn(move || {
+            while term.finish().is_none() {
+                term = term.step()
+            }
+            v.set(term.finish().unwrap()).unwrap();
+        });
+
+        Self(val)
+    }
+}
+
+impl std::ops::Deref for MobileValue {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        if let Some(v) = self.0.get() {
+            return v;
+        }
+        while let Some(Yield::Executed) = rayon::yield_now() {
+            if let Some(v) = self.0.get() {
+                return v;
+            }
+        }
+        self.0.wait()
     }
 }
 
@@ -74,26 +102,40 @@ struct Env {
 enum Kont {
     Term(Term),
     Bind(Ident, Term, Env),
+    BindBox(Ident, Term, Env),
     Arg(Term, Env),
     IfElse {
         if_true: Term,
         if_false: Term,
         env: Env,
     },
+    BinaryPrimitive(BinaryOp, Term, Env),
+    BinaryPrimitiveVal(BinaryOp, Value, Env),
 }
 
 #[derive(Debug)]
-pub struct State {
+pub struct CEK {
     ctrl: Ctrl,
     env: Env,
     cont: Vec<Kont>,
 }
 
-impl State {
+impl CEK {
     pub fn new(term: Term) -> Self {
         Self {
             ctrl: Ctrl::Term(term),
             env: Env::default(),
+            cont: Vec::new(),
+        }
+    }
+
+    fn with_global(term: Term, global: im::HashMap<Ident, (MobileValue, Env)>) -> Self {
+        Self {
+            ctrl: Ctrl::Term(term),
+            env: Env {
+                global,
+                local: Default::default(),
+            },
             cont: Vec::new(),
         }
     }
@@ -111,15 +153,25 @@ impl State {
                     },
                     // The continuation binds the control term.
                     Kont::Bind(ident, term, mut env) => {
-                        if let Value::Box(bx) = val {
-                            todo!()
-                        } else {
-                            env.local.insert(ident, (val, self.env.clone()));
-                            Self {
-                                ctrl: Ctrl::Term(term),
-                                env,
-                                cont,
-                            }
+                        env.local.insert(ident, (val, self.env.clone()));
+                        Self {
+                            ctrl: Ctrl::Term(term),
+                            env,
+                            cont,
+                        }
+                    }
+                    Kont::BindBox(ident, term, mut env) => {
+                        let Value::Box(bx) = val else { todo!() };
+                        let mv = MobileValue::compute(Self::with_global(
+                            (*bx.body).clone(),
+                            self.env.clone().global,
+                        ));
+                        env.global.insert(ident, (mv, self.env.clone()));
+
+                        Self {
+                            ctrl: Ctrl::Term(term),
+                            env,
+                            cont,
                         }
                     }
                     // We have finished evaluating a function. Push a binding to cont and start
@@ -142,6 +194,33 @@ impl State {
                         env,
                         cont,
                     },
+                    Kont::BinaryPrimitive(prim, term, env) => {
+                        cont.push(Kont::BinaryPrimitiveVal(prim, val, env.clone()));
+                        Self {
+                            ctrl: Ctrl::Term(term),
+                            env,
+                            cont,
+                        }
+                    }
+                    Kont::BinaryPrimitiveVal(prim, lhs, env) => {
+                        let (lhs, rhs) = (lhs.int(), val.int());
+                        Self {
+                            ctrl: Ctrl::Value(match prim {
+                                BinaryOp::Add => Value::Int(lhs + rhs),
+                                BinaryOp::Subtract => Value::Int(lhs - rhs),
+                                BinaryOp::Multiply => Value::Int(lhs * rhs),
+                                BinaryOp::Divide => Value::Int(lhs / rhs),
+                                BinaryOp::Equal => Value::Bool(lhs == rhs),
+                                BinaryOp::NotEqual => Value::Bool(lhs != rhs),
+                                BinaryOp::LessThan => Value::Bool(lhs < rhs),
+                                BinaryOp::GreaterThan => Value::Bool(lhs > rhs),
+                                BinaryOp::LessThanOrEqual => Value::Bool(lhs <= rhs),
+                                BinaryOp::GreaterThanOrEqual => Value::Bool(lhs >= rhs),
+                            }),
+                            env,
+                            cont,
+                        }
+                    }
                 }
             }
             Ctrl::Term(Term::IntLiteral(val)) => Self {
@@ -170,7 +249,11 @@ impl State {
             }
             Ctrl::Term(Term::GlobalVariable(ident)) => {
                 let (val, env) = self.env.global.get(&ident).unwrap().clone();
-                todo!()
+                Self {
+                    ctrl: Ctrl::Value((*val).clone()),
+                    env,
+                    cont: self.cont,
+                }
             }
             Ctrl::Term(Term::Application(Application { func, arg })) => {
                 let mut cont = self.cont;
@@ -211,13 +294,41 @@ impl State {
                     cont,
                 }
             }
+            Ctrl::Term(Term::LetBoxBinding(LetBinding {
+                binding,
+                expr,
+                body,
+            })) => {
+                let mut cont = self.cont;
+                cont.push(Kont::BindBox(binding, (*body).clone(), self.env.clone()));
+                Self {
+                    ctrl: Ctrl::Term((*expr).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
             Ctrl::Term(Term::Fix(Fix { binding, body })) => {
                 todo!()
+            }
+            Ctrl::Term(Term::BinaryPrimitive(BinaryPrimitive { op, lhs, rhs })) => {
+                let mut cont = self.cont;
+                cont.push(Kont::BinaryPrimitive(op, (*rhs).clone(), self.env.clone()));
+                Self {
+                    ctrl: Ctrl::Term((*lhs).clone()),
+                    env: self.env,
+                    cont,
+                }
             }
         }
     }
 
-    pub fn is_done(&self) -> bool {
-        matches!(self.ctrl, Ctrl::Value(_)) && self.cont.is_empty()
+    pub fn finish(&self) -> Option<Value> {
+        if !self.cont.is_empty() {
+            return None;
+        }
+        match &self.ctrl {
+            Ctrl::Value(val) => Some(val.clone()),
+            _ => None,
+        }
     }
 }
