@@ -109,6 +109,7 @@ enum Kont {
         if_false: Term,
         env: Env,
     },
+    UnaryMinus(Env),
     BinaryPrimitive(BinaryOp, Term, Env),
     BinaryPrimitiveVal(BinaryOp, Value, Env),
 }
@@ -221,6 +222,14 @@ impl CEK {
                             cont,
                         }
                     }
+                    Kont::UnaryMinus(env) => {
+                        let v = val.int();
+                        Self {
+                            ctrl: Ctrl::Value(Value::Int(-v)),
+                            env,
+                            cont,
+                        }
+                    }
                 }
             }
             Ctrl::Term(Term::IntLiteral(val)) => Self {
@@ -315,6 +324,15 @@ impl CEK {
                 cont.push(Kont::BinaryPrimitive(op, (*rhs).clone(), self.env.clone()));
                 Self {
                     ctrl: Ctrl::Term((*lhs).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::UnaryMinus(UnaryMinus(inner))) => {
+                let mut cont = self.cont;
+                cont.push(Kont::UnaryMinus(self.env.clone()));
+                Self {
+                    ctrl: Ctrl::Term((*inner).clone()),
                     env: self.env,
                     cont,
                 }

@@ -1,0 +1,7 @@
+let a =
+    let box c = box 2 in |x: Int -> Int|(c * x (-7))
+in
+let b =
+    let c = 4 in |x: Int|(if x >= 0 then |y: Int|(c * x) else |y: Int|(y * x * -1))
+in
+a (b 7)

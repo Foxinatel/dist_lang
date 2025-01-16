@@ -15,6 +15,7 @@ pub enum Term {
     LetBinding(LetBinding),
     LetBoxBinding(LetBinding),
     Fix(Fix),
+    UnaryMinus(UnaryMinus),
     BinaryPrimitive(BinaryPrimitive),
 }
 
@@ -75,3 +76,6 @@ pub struct BinaryPrimitive {
     pub lhs: Arc<Term>,
     pub rhs: Arc<Term>,
 }
+
+#[derive(Clone, Debug)]
+pub struct UnaryMinus(pub Arc<Term>);
