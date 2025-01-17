@@ -55,10 +55,16 @@ pub(super) enum Token<'a> {
     LBracket,
     #[token(")")]
     RBracket,
+    #[token("{")]
+    LBrace,
+    #[token("}")]
+    RBrace,
     #[token("|")]
     Bar,
     #[token(":")]
     Colon,
+    #[token("::")]
+    Append,
     #[token("->")]
     RArrow,
     #[token("+")]
@@ -105,6 +111,8 @@ pub(super) enum Token<'a> {
 
 #[derive(Debug)]
 pub enum TermType {
+    NilLiteral(types::Type),
+    UnitLiteral,
     BoolLiteral(bool),
     IntLiteral(i64),
     Bracketed(Box<Term>),
@@ -118,6 +126,7 @@ pub enum TermType {
     Fix(Func),
     UnaryMinus(Box<Term>),
     BinaryPrimitive(BinaryPrimitive),
+    Append(Append),
 }
 
 #[derive(Debug)]
@@ -165,6 +174,12 @@ pub struct Bx {
 }
 
 #[derive(Debug)]
+pub struct Append {
+    pub list: Box<Term>,
+    pub item: Box<Term>,
+}
+
+#[derive(Debug)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -196,6 +211,9 @@ where
             ty.clone()
                 .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket))
                 .map(|ty: types::Type| types::Type::Mobile(ty.into())),
+            ty.clone()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .map(|ty: types::Type| types::Type::List(ty.into())),
             ty.clone()
                 .then_ignore(just(Token::RArrow))
                 .then(ty)
@@ -295,8 +313,18 @@ where
                 rhs: Box::new(rhs),
             })
             .memoized();
+        let parse_append = term
+            .clone()
+            .then_ignore(just(Token::Append))
+            .then(term.clone())
+            .map(|(list, item)| Append {
+                list: Box::new(list),
+                item: Box::new(item),
+            })
+            .memoized();
 
         choice((
+            just(Token::Unit).ignored().map(|_| TermType::UnitLiteral),
             parse_let_box.map(TermType::LetBoxBinding),
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
@@ -306,6 +334,7 @@ where
                 .map(TermType::Fix),
             parse_func.map(TermType::Function),
             parse_box.map(|t| TermType::Box(Box::new(t))),
+            parse_append.map(TermType::Append),
             parse_binary_primitive.map(TermType::BinaryPrimitive),
             just(Token::Minus)
                 .ignore_then(term.clone())
@@ -313,6 +342,10 @@ where
             term.clone()
                 .delimited_by(just(Token::LBracket), just(Token::RBracket))
                 .map(|inner| TermType::Bracketed(Box::new(inner))),
+            parse_type()
+                .then_ignore(just(Token::LBrace))
+                .then_ignore(just(Token::RBrace))
+                .map(TermType::NilLiteral),
             parse_var.map(|n| TermType::Variable(n.to_owned())),
             parse_bool.map(TermType::BoolLiteral),
             parse_int.map(TermType::IntLiteral),

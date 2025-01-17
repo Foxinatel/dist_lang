@@ -2,7 +2,7 @@ use std::{ops::Range, rc::Rc};
 
 use crate::{
     dynamics,
-    parser::{self, BinaryOp, Term},
+    parser::{self, Append, BinaryOp, Term},
     StaticError, UnaryMinus,
 };
 
@@ -12,6 +12,7 @@ pub enum Type {
     Bool,
     Int,
     Mobile(Rc<Type>),
+    List(Rc<Type>),
     Func(Rc<Type>, Rc<Type>),
 }
 
@@ -21,7 +22,8 @@ impl std::fmt::Display for Type {
             Type::Unit => write!(f, "<>"),
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
-            Type::Mobile(inner) => write!(f, "[]{inner}"),
+            Type::Mobile(inner) => write!(f, "[{inner}]"),
+            Type::List(inner) => write!(f, "{{{inner}}}"),
             Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),
         }
     }
@@ -45,6 +47,8 @@ pub fn type_check_impl(
     types: TypeEnvironment,
 ) -> Result<(Type, dynamics::Term), Vec<StaticError>> {
     match term.ty {
+        parser::TermType::NilLiteral(ty) => Ok((Type::List(ty.into()), dynamics::Term::NilLiteral)),
+        parser::TermType::UnitLiteral => Ok((Type::Unit, dynamics::Term::UnitLiteral)),
         parser::TermType::BoolLiteral(val) => Ok((Type::Bool, dynamics::Term::BoolLiteral(val))),
         parser::TermType::IntLiteral(val) => Ok((Type::Int, dynamics::Term::IntLiteral(val))),
         parser::TermType::Bracketed(term) => type_check_impl(*term, types),
@@ -331,6 +335,37 @@ pub fn type_check_impl(
             Ok((
                 Type::Int,
                 dynamics::Term::UnaryMinus(UnaryMinus(inner_term.into())),
+            ))
+        }
+        parser::TermType::Append(Append { list, item }) => {
+            let (list_span, item_span) = (list.span, item.span);
+            let (list_ty, list_term) = type_check_impl(*list, types.clone())?;
+            let (item_ty, item_term) = type_check_impl(*item, types.clone())?;
+
+            let Type::List(list_ty_inner) = list_ty.clone() else {
+                return Err(vec![StaticError {
+                    span: list_span.into(),
+                    error: format!("Left side of append was not a list type. Got {list_ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            };
+
+            if *list_ty_inner != item_ty {
+                return Err(vec![StaticError {
+                    span: item_span.into(),
+                    error: format!("Right side of append does not match left side. Expected {list_ty_inner}. Got {item_ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            }
+
+            Ok((
+                list_ty,
+                dynamics::Term::Append(crate::Append {
+                    list: list_term.into(),
+                    item: item_term.into(),
+                }),
             ))
         }
     }

@@ -1,0 +1,6 @@
+let nats = fix|f: Int -> {Int}|(
+    |n: Int| (
+        let prev = if n > 0 then f (n-1) else Int{} in
+            prev :: n
+    )
+) in nats 5

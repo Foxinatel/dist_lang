@@ -4,6 +4,8 @@ pub type Ident = String;
 
 #[derive(Clone, Debug)]
 pub enum Term {
+    UnitLiteral,
+    NilLiteral,
     BoolLiteral(bool),
     IntLiteral(i64),
     Box(Bx),
@@ -17,6 +19,7 @@ pub enum Term {
     Fix(Fix),
     UnaryMinus(UnaryMinus),
     BinaryPrimitive(BinaryPrimitive),
+    Append(Append),
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +57,12 @@ pub struct Fix {
 #[derive(Clone, Debug)]
 pub struct Bx {
     pub body: Arc<Term>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Append {
+    pub list: Arc<Term>,
+    pub item: Arc<Term>,
 }
 
 #[derive(Clone, Copy, Debug)]

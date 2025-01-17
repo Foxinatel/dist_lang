@@ -9,6 +9,7 @@ pub enum Value {
     Unit,
     Int(i64),
     Bool(bool),
+    List(List),
     Func(Func),
     Box(Bx),
     Fix(Fix),
@@ -50,7 +51,18 @@ impl Value {
             todo!()
         }
     }
+
+    fn list(self) -> List {
+        if let Self::List(val) = self {
+            val
+        } else {
+            todo!()
+        }
+    }
 }
+
+#[derive(Clone, Debug, Default)]
+struct List(im::Vector<(Value, Env)>);
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,6 +73,15 @@ impl std::fmt::Display for Value {
             Value::Func(func) => write!(f, "{} -> (...)", func.binding),
             Value::Box(bx) => write!(f, "box"),
             Value::Fix(fix) => write!(f, "fix {} -> (...)", fix.binding),
+            Value::List(vec) => write!(
+                f,
+                "{{{}}}",
+                vec.0
+                    .iter()
+                    .map(|v| format!("{}", v.0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 }
@@ -149,7 +170,7 @@ enum Kont {
     Bind(Ident, Term, Env),
     BindBox(Ident, Term, Env),
     Arg(Term, Env),
-    Func(Value, Env),
+    Func(Func, Env),
     IfElse {
         if_true: Term,
         if_false: Term,
@@ -158,6 +179,12 @@ enum Kont {
     UnaryMinus,
     BinaryPrimitive(BinaryOp, Term, Env),
     BinaryPrimitiveVal(BinaryOp, Value),
+    Append(Term, Env),
+    Push {
+        list: List,
+        old_env: Env,
+        list_env: Env,
+    },
 }
 
 #[derive(Debug)]
@@ -239,7 +266,7 @@ impl CEK {
                         }
                     }
                     Kont::Arg(arg, orig_env) => {
-                        cont.push(Kont::Func(val, self.env));
+                        cont.push(Kont::Func(val.func(), self.env));
                         Self {
                             ctrl: Ctrl::Term(arg),
                             env: orig_env,
@@ -249,7 +276,7 @@ impl CEK {
                     // We have finished evaluating a function. Push a binding to cont and start
                     // computing the argument
                     Kont::Func(func, mut func_env) => {
-                        let Value::Func(Func { binding, body }) = func else {
+                        let Func { binding, body } = func else {
                             todo!()
                         };
                         func_env.local.insert(binding, (val, self.env));
@@ -303,8 +330,40 @@ impl CEK {
                             cont,
                         }
                     }
+                    Kont::Append(term, env) => {
+                        cont.push(Kont::Push {
+                            list: val.list(),
+                            old_env: env.clone(),
+                            list_env: self.env,
+                        });
+                        Self {
+                            ctrl: Ctrl::Term(term),
+                            env: env.clone(),
+                            cont,
+                        }
+                    }
+                    Kont::Push {
+                        mut list,
+                        old_env,
+                        list_env,
+                    } => {
+                        list.0.push_back((val, self.env));
+                        Self {
+                            ctrl: Ctrl::Value(Value::List(list)),
+                            env: old_env,
+                            cont,
+                        }
+                    }
                 }
             }
+            Ctrl::Term(Term::UnitLiteral) => Self {
+                ctrl: Ctrl::Value(Value::Unit),
+                ..self
+            },
+            Ctrl::Term(Term::NilLiteral) => Self {
+                ctrl: Ctrl::Value(Value::List(Default::default())),
+                ..self
+            },
             Ctrl::Term(Term::IntLiteral(val)) => Self {
                 ctrl: Ctrl::Value(Value::Int(val)),
                 ..self
@@ -418,6 +477,15 @@ impl CEK {
                 cont.push(Kont::UnaryMinus);
                 Self {
                     ctrl: Ctrl::Term((*inner).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::Append(Append { list, item })) => {
+                let mut cont = self.cont;
+                cont.push(Kont::Append((*item).clone(), self.env.clone()));
+                Self {
+                    ctrl: Ctrl::Term((*list).clone()),
                     env: self.env,
                     cont,
                 }
