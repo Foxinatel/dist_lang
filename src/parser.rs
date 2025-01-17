@@ -45,10 +45,12 @@ pub(super) enum Token<'a> {
     Ident(&'a str),
     #[regex("[0-9]+", |lex| lex.slice().parse())]
     Integer(i64),
-    #[token("[]")]
-    Mobile,
     #[token("<>")]
     Unit,
+    #[token("[")]
+    LSqBracket,
+    #[token("]")]
+    RSqBracket,
     #[token("(")]
     LBracket,
     #[token(")")]
@@ -191,8 +193,8 @@ where
 {
     recursive(|ty| {
         choice((
-            just(Token::Mobile)
-                .ignore_then(ty.clone())
+            ty.clone()
+                .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket))
                 .map(|ty: types::Type| types::Type::Mobile(ty.into())),
             ty.clone()
                 .then_ignore(just(Token::RArrow))
@@ -299,7 +301,9 @@ where
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
             parse_appl.map(TermType::Application),
-            just(Token::Fix).ignore_then(parse_func.clone()).map(TermType::Fix),
+            just(Token::Fix)
+                .ignore_then(parse_func.clone())
+                .map(TermType::Fix),
             parse_func.map(TermType::Function),
             parse_box.map(|t| TermType::Box(Box::new(t))),
             parse_binary_primitive.map(TermType::BinaryPrimitive),
