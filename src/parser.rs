@@ -41,7 +41,7 @@ impl std::fmt::Display for LexingError {
 #[logos(skip r"([ \t\n\f]|%[^%]*%)+")] // Ignore this regex pattern between tokens
 #[logos(error = LexingError)]
 pub(super) enum Token<'a> {
-    #[regex("[a-zA-Z_]+")]
+    #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'a str),
     #[regex("[0-9]+", |lex| lex.slice().parse())]
     Integer(i64),

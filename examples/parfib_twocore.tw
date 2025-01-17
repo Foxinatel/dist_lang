@@ -1,4 +1,4 @@
-let fib = fix |fib: Int -> Int|(
+let box fib = box fix |fib: Int -> Int|(
     |n: Int|(
         if n < 2 then n
         else
@@ -8,4 +8,6 @@ let fib = fix |fib: Int -> Int|(
     )
 )
 in
-fib 10
+let box fib29 = box (fib 29) in
+let box fib30 = box (fib 30) in
+fib29 + fib30
