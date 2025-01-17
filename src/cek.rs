@@ -146,8 +146,8 @@ impl std::fmt::Display for Env {
 #[derive(Debug)]
 enum Kont {
     Term(Term),
-    Bind(Ident, Term),
-    BindBox(Ident, Term),
+    Bind(Ident, Term, Env),
+    BindBox(Ident, Term, Env),
     Arg(Term, Env),
     Func(Value, Env),
     IfElse {
@@ -209,31 +209,32 @@ impl CEK {
                         cont,
                     },
                     // The continuation binds the control term.
-                    Kont::Bind(ident, term) => {
-                        let mut env = self.env.clone();
-                        env.local.insert(ident, (val, self.env.clone()));
+                    Kont::Bind(ident, term, mut old_env) => {
+                        old_env.local.insert(ident, (val, self.env.clone()));
                         Self {
                             ctrl: Ctrl::Term(term),
-                            env,
+                            env: old_env,
                             cont,
                         }
                     }
-                    Kont::BindBox(ident, term) => {
+                    Kont::BindBox(ident, term, mut old_env) => {
                         let Value::Box(bx) = val else { todo!() };
-                        let mut env = self.env.clone();
+
+                        // Create a mobile value from the globals of the old environment
                         let global_only = Env {
-                            global: self.env.global.clone(),
+                            global: old_env.global.clone(),
                             ..Env::default()
                         };
                         let mv = MobileValue::compute(Self::with_global(
                             (*bx.body).clone(),
                             global_only.global.clone(),
                         ));
-                        env.global.insert(ident, mv);
 
+                        // Continue on our current thread
+                        old_env.global.insert(ident, mv);
                         Self {
                             ctrl: Ctrl::Term(term),
-                            env,
+                            env: old_env,
                             cont,
                         }
                     }
@@ -379,7 +380,7 @@ impl CEK {
                 body,
             })) => {
                 let mut cont = self.cont;
-                cont.push(Kont::Bind(binding, (*body).clone()));
+                cont.push(Kont::Bind(binding, (*body).clone(), self.env.clone()));
                 Self {
                     ctrl: Ctrl::Term((*expr).clone()),
                     env: self.env,
@@ -392,7 +393,7 @@ impl CEK {
                 body,
             })) => {
                 let mut cont = self.cont;
-                cont.push(Kont::BindBox(binding, (*body).clone()));
+                cont.push(Kont::BindBox(binding, (*body).clone(), self.env.clone()));
                 Self {
                     ctrl: Ctrl::Term((*expr).clone()),
                     env: self.env,

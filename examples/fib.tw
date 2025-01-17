@@ -1,0 +1,11 @@
+let fib = fix |fib: Int -> Int|(
+    |n: Int|(
+        if n < 2 then n
+        else
+            let b = fib (n - 2) in
+            let a = fib (n - 1) in
+            (a + b)
+    )
+)
+in
+fib 10
