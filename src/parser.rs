@@ -113,7 +113,7 @@ pub enum TermType {
     IfElse(IfElse),
     LetBinding(LetBinding),
     LetBoxBinding(LetBinding),
-    Fix(Fix),
+    Fix(Func),
     UnaryMinus(Box<Term>),
     BinaryPrimitive(BinaryPrimitive),
 }
@@ -299,6 +299,7 @@ where
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
             parse_appl.map(TermType::Application),
+            just(Token::Fix).ignore_then(parse_func.clone()).map(TermType::Fix),
             parse_func.map(TermType::Function),
             parse_box.map(|t| TermType::Box(Box::new(t))),
             parse_binary_primitive.map(TermType::BinaryPrimitive),

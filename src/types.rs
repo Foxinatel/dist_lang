@@ -202,7 +202,43 @@ pub fn type_check_impl(
                 }),
             ))
         }
-        parser::TermType::Fix(fix) => todo!(),
+        parser::TermType::Fix(fix) => {
+            let mut new_types = types.clone();
+            let body_span = fix.body.span;
+            new_types
+                .local
+                .insert(fix.binding.clone(), fix.arg_type.clone());
+            let (body_ty, body_term) = type_check_impl(*fix.body, new_types)?;
+
+            if !matches!(fix.arg_type, Type::Func(..)) {
+                return Err(vec![StaticError {
+                    span: todo!(),
+                    error: format!("Fix is not supported for non-functions types"),
+                    help: None,
+                    note: None,
+                }]);
+            }
+
+            if body_ty != fix.arg_type {
+                return Err(vec![StaticError {
+                    span: body_span.into(),
+                    error: format!(
+                        "Fix body does not match type signature. Expected {}. Got {}",
+                        fix.arg_type, body_ty
+                    ),
+                    help: None,
+                    note: None,
+                }]);
+            }
+
+            Ok((
+                fix.arg_type,
+                dynamics::Term::Fix(crate::Fix {
+                    binding: fix.binding,
+                    body: body_term.into(),
+                }),
+            ))
+        }
         parser::TermType::BinaryPrimitive(bin) => {
             let (lhs_span, rhs_span) = (bin.lhs.span, bin.rhs.span);
             let (lhs_ty, lhs_term) = type_check_impl(*bin.lhs, types.clone())?;
@@ -217,7 +253,10 @@ pub fn type_check_impl(
                     note: None,
                 });
             }
-            if matches!(rhs_ty, Type::Int) && matches!(bin.op, BinaryOp::Subtract) {
+            if !matches!(lhs_ty, Type::Int)
+                && matches!(rhs_ty, Type::Int)
+                && matches!(bin.op, BinaryOp::Subtract)
+            {
                 errs.push(StaticError {
                     span: (lhs_span.end..rhs_span.end),
                     error: String::from(

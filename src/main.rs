@@ -54,10 +54,8 @@ fn main() {
     rayon::ThreadPoolBuilder::new().build_global().unwrap();
 
     let mut state = CEK::new(ast_dynamic);
-    // println!("{state:#?}");
     while state.finish().is_none() {
         state = state.step();
-        // println!("{state:#?}");
     }
     println!("{}", state.finish().unwrap());
     println!("{}", state.env);

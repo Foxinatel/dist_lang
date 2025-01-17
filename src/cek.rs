@@ -11,6 +11,7 @@ pub enum Value {
     Bool(bool),
     Func(Func),
     Box(Bx),
+    Fix(Fix),
 }
 
 impl Value {
@@ -59,6 +60,7 @@ impl std::fmt::Display for Value {
             Value::Bool(val) => write!(f, "{val:?}"),
             Value::Func(func) => write!(f, "{} -> (...)", func.binding),
             Value::Box(bx) => write!(f, "box"),
+            Value::Fix(fix) => write!(f, "fix {} -> (...)", fix.binding),
         }
     }
 }
@@ -187,6 +189,16 @@ impl CEK {
 
     pub fn step(self) -> Self {
         match self.ctrl {
+            Ctrl::Value(Value::Fix(fix)) => {
+                let mut nu_env = self.env.clone();
+                let nu_fix = Value::Fix(fix.clone());
+                nu_env.local.insert(fix.binding, (nu_fix, self.env.clone()));
+                Self {
+                    ctrl: Ctrl::Term((*fix.body).clone()),
+                    env: nu_env,
+                    cont: self.cont,
+                }
+            }
             Ctrl::Value(val) => {
                 let mut cont = self.cont;
                 match cont.pop().unwrap() {
@@ -387,9 +399,10 @@ impl CEK {
                     cont,
                 }
             }
-            Ctrl::Term(Term::Fix(Fix { binding, body })) => {
-                todo!()
-            }
+            Ctrl::Term(Term::Fix(fix @ Fix { .. })) => Self {
+                ctrl: Ctrl::Value(Value::Fix(fix)),
+                ..self
+            },
             Ctrl::Term(Term::BinaryPrimitive(BinaryPrimitive { op, lhs, rhs })) => {
                 let mut cont = self.cont;
                 cont.push(Kont::BinaryPrimitive(op, (*rhs).clone(), self.env.clone()));
