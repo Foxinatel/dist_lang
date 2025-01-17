@@ -2,7 +2,7 @@ use std::sync::{Arc, OnceLock};
 
 use rayon::Yield;
 
-use crate::dynamics::*;
+use crate::dynamics::{self, *};
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -51,8 +51,20 @@ impl Value {
     }
 }
 
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Unit => write!(f, "<>"),
+            Value::Int(val) => write!(f, "{val:?}"),
+            Value::Bool(val) => write!(f, "{val:?}"),
+            Value::Func(func) => write!(f, "{} -> (...)", func.binding),
+            Value::Box(bx) => write!(f, "box"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
-pub struct MobileValue(Arc<OnceLock<Value>>);
+pub struct MobileValue(Arc<OnceLock<(Value, Env)>>);
 
 impl MobileValue {
     pub fn compute(mut term: CEK) -> Self {
@@ -63,15 +75,27 @@ impl MobileValue {
             while term.finish().is_none() {
                 term = term.step()
             }
-            v.set(term.finish().unwrap()).unwrap();
+            let fin = term.finish().unwrap();
+            let env = term.env;
+            v.set((fin, env)).unwrap();
         });
 
         Self(val)
     }
 }
 
+impl std::fmt::Display for MobileValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(val) = self.0.get() {
+            write!(f, "{}", val.0)
+        } else {
+            write!(f, "Uncomputed")
+        }
+    }
+}
+
 impl std::ops::Deref for MobileValue {
-    type Target = Value;
+    type Target = (Value, Env);
 
     fn deref(&self) -> &Self::Target {
         if let Some(v) = self.0.get() {
@@ -93,31 +117,51 @@ enum Ctrl {
 }
 
 #[derive(Default, Clone, Debug)]
-struct Env {
-    global: im::HashMap<Ident, (MobileValue, Env)>,
+pub struct Env {
+    global: im::HashMap<Ident, MobileValue>,
     local: im::HashMap<Ident, (Value, Env)>,
+}
+
+impl std::fmt::Display for Env {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{local: [{}], global: [{}]}}",
+            self.local
+                .iter()
+                .map(|v| format!("({}: {})", v.0, v.1 .0))
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.global
+                .iter()
+                .map(|v| format!("({}: {})", v.0, v.1))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 #[derive(Debug)]
 enum Kont {
     Term(Term),
-    Bind(Ident, Term, Env),
-    BindBox(Ident, Term, Env),
+    Bind(Ident, Term),
+    BindBox(Ident, Term),
     Arg(Term, Env),
+    Func(Value, Env),
     IfElse {
         if_true: Term,
         if_false: Term,
         env: Env,
     },
-    UnaryMinus(Env),
+    UnaryMinus,
     BinaryPrimitive(BinaryOp, Term, Env),
-    BinaryPrimitiveVal(BinaryOp, Value, Env),
+    BinaryPrimitiveVal(BinaryOp, Value),
 }
 
 #[derive(Debug)]
 pub struct CEK {
     ctrl: Ctrl,
-    env: Env,
+    pub env: Env,
     cont: Vec<Kont>,
 }
 
@@ -130,7 +174,7 @@ impl CEK {
         }
     }
 
-    fn with_global(term: Term, global: im::HashMap<Ident, (MobileValue, Env)>) -> Self {
+    fn with_global(term: Term, global: im::HashMap<Ident, MobileValue>) -> Self {
         Self {
             ctrl: Ctrl::Term(term),
             env: Env {
@@ -153,7 +197,8 @@ impl CEK {
                         cont,
                     },
                     // The continuation binds the control term.
-                    Kont::Bind(ident, term, mut env) => {
+                    Kont::Bind(ident, term) => {
+                        let mut env = self.env.clone();
                         env.local.insert(ident, (val, self.env.clone()));
                         Self {
                             ctrl: Ctrl::Term(term),
@@ -161,13 +206,18 @@ impl CEK {
                             cont,
                         }
                     }
-                    Kont::BindBox(ident, term, mut env) => {
+                    Kont::BindBox(ident, term) => {
                         let Value::Box(bx) = val else { todo!() };
+                        let mut env = self.env.clone();
+                        let global_only = Env {
+                            global: self.env.global.clone(),
+                            ..Env::default()
+                        };
                         let mv = MobileValue::compute(Self::with_global(
                             (*bx.body).clone(),
-                            self.env.clone().global,
+                            global_only.global.clone(),
                         ));
-                        env.global.insert(ident, (mv, self.env.clone()));
+                        env.global.insert(ident, mv);
 
                         Self {
                             ctrl: Ctrl::Term(term),
@@ -175,14 +225,24 @@ impl CEK {
                             cont,
                         }
                     }
-                    // We have finished evaluating a function. Push a binding to cont and start
-                    // computing the argument
-                    Kont::Arg(arg, arg_env) => {
-                        let Func { binding, body } = val.func();
-                        cont.push(Kont::Bind(binding, (*body).clone(), self.env));
+                    Kont::Arg(arg, orig_env) => {
+                        cont.push(Kont::Func(val, self.env));
                         Self {
                             ctrl: Ctrl::Term(arg),
-                            env: arg_env,
+                            env: orig_env,
+                            cont,
+                        }
+                    }
+                    // We have finished evaluating a function. Push a binding to cont and start
+                    // computing the argument
+                    Kont::Func(func, mut func_env) => {
+                        let Value::Func(Func { binding, body }) = func else {
+                            todo!()
+                        };
+                        func_env.local.insert(binding, (val, self.env));
+                        Self {
+                            ctrl: Ctrl::Term((*body).clone()),
+                            env: func_env,
                             cont,
                         }
                     }
@@ -196,14 +256,14 @@ impl CEK {
                         cont,
                     },
                     Kont::BinaryPrimitive(prim, term, env) => {
-                        cont.push(Kont::BinaryPrimitiveVal(prim, val, env.clone()));
+                        cont.push(Kont::BinaryPrimitiveVal(prim, val));
                         Self {
                             ctrl: Ctrl::Term(term),
                             env,
                             cont,
                         }
                     }
-                    Kont::BinaryPrimitiveVal(prim, lhs, env) => {
+                    Kont::BinaryPrimitiveVal(prim, lhs) => {
                         let (lhs, rhs) = (lhs.int(), val.int());
                         Self {
                             ctrl: Ctrl::Value(match prim {
@@ -218,15 +278,15 @@ impl CEK {
                                 BinaryOp::LessThanOrEqual => Value::Bool(lhs <= rhs),
                                 BinaryOp::GreaterThanOrEqual => Value::Bool(lhs >= rhs),
                             }),
-                            env,
+                            env: self.env,
                             cont,
                         }
                     }
-                    Kont::UnaryMinus(env) => {
+                    Kont::UnaryMinus => {
                         let v = val.int();
                         Self {
                             ctrl: Ctrl::Value(Value::Int(-v)),
-                            env,
+                            env: self.env,
                             cont,
                         }
                     }
@@ -249,7 +309,12 @@ impl CEK {
                 ..self
             },
             Ctrl::Term(Term::LocalVariable(ident)) => {
-                let (val, env) = self.env.local.get(&ident).unwrap().clone();
+                let Some((val, env)) = self.env.local.get(&ident).cloned() else {
+                    panic!(
+                        "Could not find local variable {ident} in scope {}",
+                        self.env
+                    )
+                };
                 Self {
                     ctrl: Ctrl::Value(val),
                     env,
@@ -257,9 +322,15 @@ impl CEK {
                 }
             }
             Ctrl::Term(Term::GlobalVariable(ident)) => {
-                let (val, env) = self.env.global.get(&ident).unwrap().clone();
+                let Some(mobile) = self.env.global.get(&ident).cloned() else {
+                    panic!(
+                        "Could not find global variable {ident} in scope {}",
+                        self.env
+                    )
+                };
+                let (val, env) = (*mobile).clone();
                 Self {
-                    ctrl: Ctrl::Value((*val).clone()),
+                    ctrl: Ctrl::Value(val),
                     env,
                     cont: self.cont,
                 }
@@ -296,7 +367,7 @@ impl CEK {
                 body,
             })) => {
                 let mut cont = self.cont;
-                cont.push(Kont::Bind(binding, (*body).clone(), self.env.clone()));
+                cont.push(Kont::Bind(binding, (*body).clone()));
                 Self {
                     ctrl: Ctrl::Term((*expr).clone()),
                     env: self.env,
@@ -309,7 +380,7 @@ impl CEK {
                 body,
             })) => {
                 let mut cont = self.cont;
-                cont.push(Kont::BindBox(binding, (*body).clone(), self.env.clone()));
+                cont.push(Kont::BindBox(binding, (*body).clone()));
                 Self {
                     ctrl: Ctrl::Term((*expr).clone()),
                     env: self.env,
@@ -330,7 +401,7 @@ impl CEK {
             }
             Ctrl::Term(Term::UnaryMinus(UnaryMinus(inner))) => {
                 let mut cont = self.cont;
-                cont.push(Kont::UnaryMinus(self.env.clone()));
+                cont.push(Kont::UnaryMinus);
                 Self {
                     ctrl: Ctrl::Term((*inner).clone()),
                     env: self.env,

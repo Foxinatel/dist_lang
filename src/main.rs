@@ -59,5 +59,6 @@ fn main() {
         state = state.step();
         // println!("{state:#?}");
     }
-    println!("{:#?}", state.finish());
+    println!("{}", state.finish().unwrap());
+    println!("{}", state.env);
 }

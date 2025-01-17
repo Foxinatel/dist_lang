@@ -1,8 +1,8 @@
-use std::rc::Rc;
+use std::{ops::Range, rc::Rc};
 
 use crate::{
     dynamics,
-    parser::{self, Term},
+    parser::{self, BinaryOp, Term},
     StaticError, UnaryMinus,
 };
 
@@ -22,7 +22,7 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
             Type::Mobile(inner) => write!(f, "[]{inner}"),
-            Type::Func(arg, ret) => write!(f, "{arg} -> {ret}"),
+            Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),
         }
     }
 }
@@ -213,6 +213,16 @@ pub fn type_check_impl(
                 errs.push(StaticError {
                     span: lhs_span.into(),
                     error: format!("Left-hand side of binary expression does not evaluate to Int. Got {lhs_ty}"),
+                    help: None,
+                    note: None,
+                });
+            }
+            if matches!(rhs_ty, Type::Int) && matches!(bin.op, BinaryOp::Subtract) {
+                errs.push(StaticError {
+                    span: (lhs_span.end..rhs_span.end),
+                    error: String::from(
+                        "If you intended to perform application with a negated argument, wrap this argument in brackets",
+                    ),
                     help: None,
                     note: None,
                 });
