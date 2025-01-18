@@ -368,6 +368,37 @@ fn type_check_impl(
                 }),
             ))
         }
+        parser::TermType::Index(parser::Index { list, index }) => {
+            let (list_span, index_span) = (list.span, index.span);
+            let (list_ty, list_term) = type_check_impl(*list, types.clone())?;
+            let (index_ty, index_term) = type_check_impl(*index, types.clone())?;
+
+            let Type::List(list_ty_inner) = list_ty.clone() else {
+                return Err(vec![StaticError {
+                    span: list_span.into(),
+                    error: format!("Left side of index was not a list type. Got {list_ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            };
+
+            if !matches!(index_ty, Type::Int) {
+                return Err(vec![StaticError {
+                    span: index_span.into(),
+                    error: format!("Right side of index was not an Int. Got {index_ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            }
+
+            Ok((
+                (*list_ty_inner).clone(),
+                dynamics::Term::Index(crate::Index {
+                    list: list_term.into(),
+                    index: index_term.into(),
+                }),
+            ))
+        }
     }
 }
 

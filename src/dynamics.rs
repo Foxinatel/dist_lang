@@ -20,6 +20,7 @@ pub enum Term {
     UnaryMinus(UnaryMinus),
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
+    Index(Index),
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +64,12 @@ pub struct Bx {
 pub struct Append {
     pub list: Arc<Term>,
     pub item: Arc<Term>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Index {
+    pub list: Arc<Term>,
+    pub index: Arc<Term>,
 }
 
 #[derive(Clone, Copy, Debug)]

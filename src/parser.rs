@@ -125,6 +125,7 @@ pub enum TermType {
     UnaryMinus(Box<Term>),
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
+    Index(Index),
 }
 
 #[derive(Debug)]
@@ -164,6 +165,12 @@ pub struct LetBinding {
 pub struct Append {
     pub list: Box<Term>,
     pub item: Box<Term>,
+}
+
+#[derive(Debug)]
+pub struct Index {
+    pub list: Box<Term>,
+    pub index: Box<Term>,
 }
 
 #[derive(Debug)]
@@ -311,6 +318,17 @@ where
                 item: Box::new(item),
             })
             .memoized();
+        let parse_index = term
+            .clone()
+            .then(
+                term.clone()
+                    .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket)),
+            )
+            .map(|(list, index)| Index {
+                list: Box::new(list),
+                index: Box::new(index),
+            })
+            .memoized();
 
         choice((
             just(Token::Unit).ignored().map(|_| TermType::UnitLiteral),
@@ -324,6 +342,7 @@ where
             parse_func.map(TermType::Function),
             parse_box.map(|t| TermType::Box(Box::new(t))),
             parse_append.map(TermType::Append),
+            parse_index.map(TermType::Index),
             parse_binary_primitive.map(TermType::BinaryPrimitive),
             just(Token::Minus)
                 .ignore_then(term.clone())

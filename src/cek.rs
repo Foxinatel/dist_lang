@@ -179,6 +179,8 @@ enum Kont {
         list: List,
         old_env: Env,
     },
+    ResolvList(Term, Env),
+    Index(List),
 }
 
 #[derive(Debug)]
@@ -246,7 +248,6 @@ impl Cek {
                         ));
 
                         // Continue on our current thread
-                        println!("Inserting mobile value {ident}");
                         old_env.global.insert(ident, mv);
                         Self {
                             ctrl: Ctrl::Term(term),
@@ -332,6 +333,22 @@ impl Cek {
                         Self {
                             ctrl: Ctrl::Value(Value::List(list)),
                             env: old_env,
+                            cont,
+                        }
+                    }
+                    Kont::ResolvList(term, env) => {
+                        cont.push(Kont::Index(val.list()));
+                        Self {
+                            ctrl: Ctrl::Term(term),
+                            env: env.clone(),
+                            cont,
+                        }
+                    }
+                    Kont::Index(list) => {
+                        let (val, env) = list.0[val.int() as usize].clone();
+                        Self {
+                            ctrl: Ctrl::Value(val),
+                            env,
                             cont,
                         }
                     }
@@ -465,6 +482,15 @@ impl Cek {
             Ctrl::Term(Term::Append(Append { list, item })) => {
                 let mut cont = self.cont;
                 cont.push(Kont::Append((*item).clone(), self.env.clone()));
+                Self {
+                    ctrl: Ctrl::Term((*list).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::Index(Index { list, index })) => {
+                let mut cont = self.cont;
+                cont.push(Kont::ResolvList((*index).clone(), self.env.clone()));
                 Self {
                     ctrl: Ctrl::Term((*list).clone()),
                     env: self.env,
