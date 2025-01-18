@@ -237,7 +237,7 @@ impl Cek {
 
                         // Create a mobile value from the globals of the old environment
                         let global_only = Env {
-                            global: old_env.global.clone(),
+                            global: self.env.global.clone(),
                             ..Env::default()
                         };
                         let mv = MobileValue::compute(Self::with_global(
@@ -246,6 +246,7 @@ impl Cek {
                         ));
 
                         // Continue on our current thread
+                        println!("Inserting mobile value {ident}");
                         old_env.global.insert(ident, mv);
                         Self {
                             ctrl: Ctrl::Term(term),
