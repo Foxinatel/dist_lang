@@ -3,7 +3,7 @@
 
 use ariadne::*;
 
-use cek::CEK;
+use cek::Cek;
 use dynamics::*;
 
 mod cek;
@@ -53,7 +53,7 @@ fn main() {
 
     rayon::ThreadPoolBuilder::new().build_global().unwrap();
 
-    let mut state = CEK::new(ast_dynamic);
+    let mut state = Cek::new(ast_dynamic);
     while state.finish().is_none() {
         state = state.step();
     }

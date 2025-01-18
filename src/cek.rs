@@ -2,7 +2,7 @@ use std::sync::{Arc, OnceLock};
 
 use rayon::Yield;
 
-use crate::dynamics::{self, *};
+use crate::dynamics::*;
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -16,10 +16,6 @@ pub enum Value {
 }
 
 impl Value {
-    fn unit(self) {
-        let Self::Unit = self else { todo!() };
-    }
-
     fn int(self) -> i64 {
         if let Self::Int(val) = self {
             val
@@ -62,7 +58,7 @@ impl Value {
 }
 
 #[derive(Clone, Debug, Default)]
-struct List(im::Vector<(Value, Env)>);
+pub struct List(im::Vector<(Value, Env)>);
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -71,7 +67,7 @@ impl std::fmt::Display for Value {
             Value::Int(val) => write!(f, "{val:?}"),
             Value::Bool(val) => write!(f, "{val:?}"),
             Value::Func(func) => write!(f, "{} -> (...)", func.binding),
-            Value::Box(bx) => write!(f, "box"),
+            Value::Box(_) => write!(f, "box (...)"),
             Value::Fix(fix) => write!(f, "fix {} -> (...)", fix.binding),
             Value::List(vec) => write!(
                 f,
@@ -90,7 +86,7 @@ impl std::fmt::Display for Value {
 pub struct MobileValue(Arc<OnceLock<(Value, Env)>>);
 
 impl MobileValue {
-    pub fn compute(mut term: CEK) -> Self {
+    pub fn compute(mut term: Cek) -> Self {
         let val = Arc::new(OnceLock::new());
 
         let v = val.clone();
@@ -166,7 +162,6 @@ impl std::fmt::Display for Env {
 
 #[derive(Debug)]
 enum Kont {
-    Term(Term),
     Bind(Ident, Term, Env),
     BindBox(Ident, Term, Env),
     Arg(Term, Env),
@@ -183,18 +178,17 @@ enum Kont {
     Push {
         list: List,
         old_env: Env,
-        list_env: Env,
     },
 }
 
 #[derive(Debug)]
-pub struct CEK {
+pub struct Cek {
     ctrl: Ctrl,
     pub env: Env,
     cont: Vec<Kont>,
 }
 
-impl CEK {
+impl Cek {
     pub fn new(term: Term) -> Self {
         Self {
             ctrl: Ctrl::Term(term),
@@ -229,12 +223,6 @@ impl CEK {
             Ctrl::Value(val) => {
                 let mut cont = self.cont;
                 match cont.pop().unwrap() {
-                    // The continuation has a new term. Run it.
-                    Kont::Term(term) => Self {
-                        ctrl: Ctrl::Term(term),
-                        env: self.env,
-                        cont,
-                    },
                     // The continuation binds the control term.
                     Kont::Bind(ident, term, mut old_env) => {
                         old_env.local.insert(ident, (val, self.env.clone()));
@@ -245,7 +233,7 @@ impl CEK {
                         }
                     }
                     Kont::BindBox(ident, term, mut old_env) => {
-                        let Value::Box(bx) = val else { todo!() };
+                        let bx = val.bx();
 
                         // Create a mobile value from the globals of the old environment
                         let global_only = Env {
@@ -275,10 +263,7 @@ impl CEK {
                     }
                     // We have finished evaluating a function. Push a binding to cont and start
                     // computing the argument
-                    Kont::Func(func, mut func_env) => {
-                        let Func { binding, body } = func else {
-                            todo!()
-                        };
+                    Kont::Func(Func { binding, body }, mut func_env) => {
                         func_env.local.insert(binding, (val, self.env));
                         Self {
                             ctrl: Ctrl::Term((*body).clone()),
@@ -334,7 +319,6 @@ impl CEK {
                         cont.push(Kont::Push {
                             list: val.list(),
                             old_env: env.clone(),
-                            list_env: self.env,
                         });
                         Self {
                             ctrl: Ctrl::Term(term),
@@ -342,11 +326,7 @@ impl CEK {
                             cont,
                         }
                     }
-                    Kont::Push {
-                        mut list,
-                        old_env,
-                        list_env,
-                    } => {
+                    Kont::Push { mut list, old_env } => {
                         list.0.push_back((val, self.env));
                         Self {
                             ctrl: Ctrl::Value(Value::List(list)),

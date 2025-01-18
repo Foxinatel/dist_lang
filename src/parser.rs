@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use chumsky::{
     input::{Stream, ValueInput},
     prelude::*,
@@ -163,17 +161,6 @@ pub struct LetBinding {
 }
 
 #[derive(Debug)]
-pub struct Fix {
-    pub binding: String,
-    pub body: Box<Term>,
-}
-
-#[derive(Debug)]
-pub struct Bx {
-    pub body: Box<Term>,
-}
-
-#[derive(Debug)]
 pub struct Append {
     pub list: Box<Term>,
     pub item: Box<Term>,
@@ -206,26 +193,28 @@ pub fn parse_type<'a, I>() -> impl Clone + Parser<'a, I, types::Type, Full<'a>>
 where
     I: ValueInput<'a, Token = Token<'a>, Span = SimpleSpan>,
 {
-    recursive(|ty| {
-        choice((
-            ty.clone()
-                .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket))
-                .map(|ty: types::Type| types::Type::Mobile(ty.into())),
-            ty.clone()
-                .delimited_by(just(Token::LBrace), just(Token::RBrace))
-                .map(|ty: types::Type| types::Type::List(ty.into())),
-            ty.clone()
-                .then_ignore(just(Token::RArrow))
-                .then(ty)
-                .memoized()
-                .map(|(l, r)| types::Type::Func(l.into(), r.into())),
-            select! {
-                Token::Unit => types::Type::Unit,
-                Token::Ident("Bool") => types::Type::Bool,
-                Token::Ident("Int") => types::Type::Int,
-            },
-        ))
-    })
+    recursive(
+        |ty: chumsky::recursive::Recursive<dyn chumsky::Parser<'_, I, types::Type, Full<'a>>>| {
+            choice((
+                ty.clone()
+                    .then_ignore(just(Token::RArrow))
+                    .then(ty.clone())
+                    .memoized()
+                    .map(|(l, r)| types::Type::Func(l.into(), r.into())),
+                ty.clone()
+                    .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket))
+                    .map(|ty: types::Type| types::Type::Mobile(ty.into())),
+                ty.clone()
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                    .map(|ty: types::Type| types::Type::List(ty.into())),
+                select! {
+                    Token::Unit => types::Type::Unit,
+                    Token::Ident("Bool") => types::Type::Bool,
+                    Token::Ident("Int") => types::Type::Int,
+                },
+            ))
+        },
+    )
 }
 
 pub fn parse_term<'a, I>() -> impl Parser<'a, I, Term, Full<'a>>

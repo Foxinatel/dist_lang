@@ -1,4 +1,4 @@
-use std::{ops::Range, rc::Rc};
+use std::rc::Rc;
 
 use crate::{
     dynamics,
@@ -42,7 +42,7 @@ impl TypeEnvironment {
     }
 }
 
-pub fn type_check_impl(
+fn type_check_impl(
     term: Term,
     types: TypeEnvironment,
 ) -> Result<(Type, dynamics::Term), Vec<StaticError>> {
@@ -90,7 +90,7 @@ pub fn type_check_impl(
             ))
         }
         parser::TermType::Application(app) => {
-            let func_span = app.func.span;
+            let (func_span, arg_span) = (app.func.span, app.arg.span);
             let (func_ty, func_term) = type_check_impl(*app.func, types.clone())?;
             let (arg_ty, arg_term) = type_check_impl(*app.arg, types.clone())?;
 
@@ -107,7 +107,7 @@ pub fn type_check_impl(
 
             if arg_ty != *farg_ty {
                 return Err(vec![StaticError {
-                    span: func_span.into(),
+                    span: arg_span.into(),
                     error: format!("Right side of application did not match function type. Expected {farg_ty}. Got {arg_ty}"),
                     help: None,
                     note: None,
@@ -216,8 +216,8 @@ pub fn type_check_impl(
 
             if !matches!(fix.arg_type, Type::Func(..)) {
                 return Err(vec![StaticError {
-                    span: todo!(),
-                    error: format!("Fix is not supported for non-functions types"),
+                    span: term.span.into(),
+                    error: "Fix is not supported for non-functions types".to_string(),
                     help: None,
                     note: None,
                 }]);
