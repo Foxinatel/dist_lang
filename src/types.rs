@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use chumsky::span::SimpleSpan;
+
 use crate::{
     dynamics,
     parser::{self, Append, BinaryOp, Term},
@@ -31,8 +33,8 @@ impl std::fmt::Display for Type {
 
 #[derive(Clone, Default)]
 struct TypeEnvironment {
-    local: im::HashMap<String, Type>,
-    global: im::HashMap<String, Type>,
+    local: im::HashMap<String, (Type, SimpleSpan)>,
+    global: im::HashMap<String, (Type, SimpleSpan)>,
 }
 
 impl TypeEnvironment {
@@ -61,14 +63,14 @@ fn type_check_impl(
             ))
         }
         parser::TermType::Variable(var) => {
-            if let Some(ty) = types.local.get(&var) {
-                Ok((ty.clone(), dynamics::Term::LocalVariable(var)))
-            } else if let Some(ty) = types.global.get(&var) {
-                Ok((ty.clone(), dynamics::Term::GlobalVariable(var)))
+            if let Some((ty, _)) = types.local.get(&var.ident) {
+                Ok((ty.clone(), dynamics::Term::LocalVariable(var.ident)))
+            } else if let Some((ty, _)) = types.global.get(&var.ident) {
+                Ok((ty.clone(), dynamics::Term::GlobalVariable(var.ident)))
             } else {
                 Err(vec![StaticError {
                     span: term.span.into(),
-                    error: format!("Could not find variable {var} in context"),
+                    error: format!("Could not find variable {} in context", var.ident),
                     help: None,
                     note: None,
                 }])
@@ -76,15 +78,16 @@ fn type_check_impl(
         }
         parser::TermType::Function(func) => {
             let mut new_types = types.clone();
-            new_types
-                .local
-                .insert(func.binding.clone(), func.arg_type.clone());
+            new_types.local.insert(
+                func.binding.ident.clone(),
+                (func.arg_type.clone(), func.binding.span),
+            );
             let (body_ty, body_term) = type_check_impl(*func.body, new_types)?;
 
             Ok((
                 Type::Func(func.arg_type.into(), body_ty.into()),
                 dynamics::Term::Function(dynamics::Func {
-                    binding: func.binding,
+                    binding: func.binding.ident,
                     body: body_term.into(),
                 }),
             ))
@@ -166,20 +169,57 @@ fn type_check_impl(
             ))
         }
         parser::TermType::LetBinding(let_binding) => {
+            if let Some((_, prev_span)) = types.global.get(&let_binding.binding.ident) {
+                return Err(vec![
+                    StaticError {
+                        span: let_binding.binding.span.into(),
+                        error: String::from("Conflicting variable binding"),
+                        help: None,
+                        note: None,
+                    },
+                    StaticError {
+                        span: (*prev_span).into(),
+                        error: String::from("Previously defined here"),
+                        help: None,
+                        note: None,
+                    },
+                ]);
+            }
+
             let (ev_ty, ev_term) = type_check_impl(*let_binding.expr, types.clone())?;
             let mut new_types = types.clone();
-            new_types.local.insert(let_binding.binding.clone(), ev_ty);
+            new_types.local.insert(
+                let_binding.binding.ident.clone(),
+                (ev_ty, let_binding.binding.span),
+            );
             let (body_ty, body_term) = type_check_impl(*let_binding.body, new_types)?;
             Ok((
                 body_ty,
                 dynamics::Term::LetBinding(dynamics::LetBinding {
-                    binding: let_binding.binding,
+                    binding: let_binding.binding.ident,
                     expr: ev_term.into(),
                     body: body_term.into(),
                 }),
             ))
         }
         parser::TermType::LetBoxBinding(let_binding) => {
+            if let Some((_, prev_span)) = types.local.get(&let_binding.binding.ident) {
+                return Err(vec![
+                    StaticError {
+                        span: let_binding.binding.span.into(),
+                        error: String::from("Conflicting variable binding"),
+                        help: None,
+                        note: None,
+                    },
+                    StaticError {
+                        span: (*prev_span).into(),
+                        error: String::from("Previously defined here"),
+                        help: None,
+                        note: None,
+                    },
+                ]);
+            }
+
             let ev_span = let_binding.expr.span;
             let (ev_ty, ev_term) = type_check_impl(*let_binding.expr, types.clone())?;
             let Type::Mobile(ev_ty) = ev_ty else {
@@ -192,15 +232,16 @@ fn type_check_impl(
             };
 
             let mut new_types = types.clone();
-            new_types
-                .global
-                .insert(let_binding.binding.clone(), (*ev_ty).clone());
+            new_types.global.insert(
+                let_binding.binding.ident.clone(),
+                ((*ev_ty).clone(), let_binding.binding.span),
+            );
             let (body_ty, body_term) = type_check_impl(*let_binding.body, new_types)?;
 
             Ok((
                 body_ty,
                 dynamics::Term::LetBoxBinding(dynamics::LetBinding {
-                    binding: let_binding.binding,
+                    binding: let_binding.binding.ident,
                     expr: ev_term.into(),
                     body: body_term.into(),
                 }),
@@ -209,9 +250,10 @@ fn type_check_impl(
         parser::TermType::Fix(fix) => {
             let mut new_types = types.clone();
             let body_span = fix.body.span;
-            new_types
-                .local
-                .insert(fix.binding.clone(), fix.arg_type.clone());
+            new_types.local.insert(
+                fix.binding.ident.clone(),
+                (fix.arg_type.clone(), fix.binding.span),
+            );
             let (body_ty, body_term) = type_check_impl(*fix.body, new_types)?;
 
             if !matches!(fix.arg_type, Type::Func(..)) {
@@ -238,7 +280,7 @@ fn type_check_impl(
             Ok((
                 fix.arg_type,
                 dynamics::Term::Fix(crate::Fix {
-                    binding: fix.binding,
+                    binding: fix.binding.ident,
                     body: body_term.into(),
                 }),
             ))

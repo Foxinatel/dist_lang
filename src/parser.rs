@@ -115,7 +115,7 @@ pub enum TermType {
     IntLiteral(i64),
     Bracketed(Box<Term>),
     Box(Box<Term>),
-    Variable(String),
+    Variable(Ident),
     Function(Func),
     Application(Application),
     IfElse(IfElse),
@@ -136,7 +136,7 @@ pub struct Term {
 
 #[derive(Debug)]
 pub struct Func {
-    pub binding: String,
+    pub binding: Ident,
     pub arg_type: types::Type,
     pub body: Box<Term>,
 }
@@ -156,7 +156,7 @@ pub struct IfElse {
 
 #[derive(Debug)]
 pub struct LetBinding {
-    pub binding: String,
+    pub binding: Ident,
     pub expr: Box<Term>,
     pub body: Box<Term>,
 }
@@ -171,6 +171,12 @@ pub struct Append {
 pub struct Index {
     pub list: Box<Term>,
     pub index: Box<Term>,
+}
+
+#[derive(Debug)]
+pub struct Ident {
+    pub ident: String,
+    pub span: SimpleSpan,
 }
 
 #[derive(Debug)]
@@ -235,15 +241,20 @@ where
             Token::False => false,
         };
         let parse_box = just(Token::Box).ignore_then(term.clone());
-        let parse_var = select! { Token::Ident(name) => name };
+        let parse_var = (select! { Token::Ident(name) => name }).try_map_with(|v, e| {
+            Ok(Ident {
+                ident: String::from(v),
+                span: e.span(),
+            })
+        });
         let parse_func = parse_var
             .then_ignore(just(Token::Colon))
             .then(parse_type())
             .delimited_by(just(Token::Bar), just(Token::Bar))
             .then(term.clone())
-            .map(|((bind, ty), body)| Func {
-                binding: bind.to_string(),
-                arg_type: ty,
+            .map(|((binding, arg_type), body)| Func {
+                binding,
+                arg_type,
                 body: Box::new(body),
             });
         let parse_appl = term
@@ -271,8 +282,8 @@ where
             .then(term.clone())
             .then_ignore(just(Token::In))
             .then(term.clone())
-            .map(|((ident, expr), body)| LetBinding {
-                binding: ident.to_string(),
+            .map(|((binding, expr), body)| LetBinding {
+                binding,
                 expr: Box::new(expr),
                 body: Box::new(body),
             });
@@ -283,8 +294,8 @@ where
             .then(term.clone())
             .then_ignore(just(Token::In))
             .then(term.clone())
-            .map(|((ident, expr), body)| LetBinding {
-                binding: ident.to_string(),
+            .map(|((binding, expr), body)| LetBinding {
+                binding,
                 expr: Box::new(expr),
                 body: Box::new(body),
             });
@@ -354,7 +365,7 @@ where
                 .then_ignore(just(Token::LBrace))
                 .then_ignore(just(Token::RBrace))
                 .map(TermType::NilLiteral),
-            parse_var.map(|n| TermType::Variable(n.to_owned())),
+            parse_var.map(TermType::Variable),
             parse_bool.map(TermType::BoolLiteral),
             parse_int.map(TermType::IntLiteral),
         ))

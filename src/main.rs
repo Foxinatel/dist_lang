@@ -22,7 +22,10 @@ pub struct StaticError {
 fn unwrap_static<T>(result: Result<T, Vec<StaticError>>, file: &str, src: &str) -> T {
     result.unwrap_or_else(|errs| {
         let mut colours = ColorGenerator::default();
-        let mut display = Report::build(ReportKind::Error, (&file, 0..0));
+        let mut display = Report::build(
+            ReportKind::Error,
+            (&file, errs.first().unwrap().span.clone()),
+        );
         for err in errs {
             display.add_label(
                 Label::new((&file, err.span))
