@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use malachite::Natural;
+
 pub type Ident = String;
 
 #[derive(Clone, Debug)]
@@ -7,7 +9,7 @@ pub enum Term {
     UnitLiteral,
     NilLiteral,
     BoolLiteral(bool),
-    IntLiteral(i64),
+    IntLiteral(Natural),
     Box(Bx),
     LocalVariable(Ident),
     GlobalVariable(Ident),

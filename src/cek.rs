@@ -1,5 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
+use malachite::Integer;
 use rayon::Yield;
 
 use crate::dynamics::*;
@@ -7,7 +8,7 @@ use crate::dynamics::*;
 #[derive(Clone, Debug)]
 pub enum Value {
     Unit,
-    Int(i64),
+    Int(Integer),
     Bool(bool),
     List(List),
     Func(Func),
@@ -16,7 +17,7 @@ pub enum Value {
 }
 
 impl Value {
-    fn int(self) -> i64 {
+    fn int(self) -> Integer {
         if let Self::Int(val) = self {
             val
         } else {
@@ -345,9 +346,10 @@ impl Cek {
                         }
                     }
                     Kont::Index(list) => {
-                        let (val, env) = list.0[val.int() as usize].clone();
+                        let ind: usize = (&val.int()).try_into().unwrap();
+                        let (item, env) = list.0[ind].clone();
                         Self {
-                            ctrl: Ctrl::Value(val),
+                            ctrl: Ctrl::Value(item),
                             env,
                             cont,
                         }
@@ -363,7 +365,7 @@ impl Cek {
                 ..self
             },
             Ctrl::Term(Term::IntLiteral(val)) => Self {
-                ctrl: Ctrl::Value(Value::Int(val)),
+                ctrl: Ctrl::Value(Value::Int(val.into())),
                 ..self
             },
             Ctrl::Term(Term::BoolLiteral(val)) => Self {

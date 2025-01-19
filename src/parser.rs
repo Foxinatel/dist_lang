@@ -2,6 +2,7 @@ use chumsky::{
     input::{Stream, ValueInput},
     prelude::*,
 };
+use malachite::{num::conversion::traits::FromSciString, Natural};
 
 use crate::{types, StaticError};
 
@@ -41,8 +42,8 @@ impl std::fmt::Display for LexingError {
 pub(super) enum Token<'a> {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'a str),
-    #[regex("[0-9]+", |lex| lex.slice().parse())]
-    Integer(i64),
+    #[regex("[0-9]+", |lex| Natural::from_sci_string(lex.slice()))]
+    Integer(Natural),
     #[token("<>")]
     Unit,
     #[token("[")]
@@ -112,7 +113,7 @@ pub enum TermType {
     NilLiteral(types::Type),
     UnitLiteral,
     BoolLiteral(bool),
-    IntLiteral(i64),
+    IntLiteral(Natural),
     Bracketed(Box<Term>),
     Box(Box<Term>),
     Variable(Ident),

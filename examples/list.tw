@@ -15,4 +15,4 @@ let nats_box = fix|f: [Int] -> {[Int]}|(
     )
 )
 in
-let box n = (nats_box (box 20))[4] in n
+let box n = (nats_box (box 20))[200000000000000000000000000] in n
