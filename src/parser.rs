@@ -44,8 +44,8 @@ pub(super) enum Token<'a> {
     Ident(&'a str),
     #[regex("[0-9]+", |lex| Natural::from_sci_string(lex.slice()))]
     Integer(Natural),
-    #[token("<>")]
-    Unit,
+    #[token(",")]
+    Comma,
     #[token("[")]
     LSqBracket,
     #[token("]")]
@@ -75,11 +75,11 @@ pub(super) enum Token<'a> {
     #[token("/")]
     Divide,
     #[token("<")]
-    LessThan,
+    LAngleBracket,
+    #[token(">")]
+    RAngleBracket,
     #[token("<=")]
     LessThanOrEqual,
-    #[token(">")]
-    GreaterThan,
     #[token(">=")]
     GreaterThanOrEqual,
     #[token("==")]
@@ -111,7 +111,7 @@ pub(super) enum Token<'a> {
 #[derive(Debug)]
 pub enum TermType {
     NilLiteral(types::Type),
-    UnitLiteral,
+    Tuple(Box<[Term]>),
     BoolLiteral(bool),
     IntLiteral(Natural),
     Bracketed(Box<Term>),
@@ -221,8 +221,12 @@ where
                 ty.clone()
                     .delimited_by(just(Token::LBrace), just(Token::RBrace))
                     .map(|ty: types::Type| types::Type::List(ty.into())),
+                ty.clone()
+                    .separated_by(just(Token::Comma))
+                    .collect::<Vec<_>>()
+                    .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket))
+                    .map(|tys| types::Type::Tuple(tys.into())),
                 select! {
-                    Token::Unit => types::Type::Unit,
                     Token::Ident("Bool") => types::Type::Bool,
                     Token::Ident("Int") => types::Type::Int,
                 },
@@ -309,8 +313,8 @@ where
                 Token::Divide => BinaryOp::Divide,
                 Token::EqualTo => BinaryOp::Equal,
                 Token::NotEqualTo => BinaryOp::NotEqual,
-                Token::LessThan => BinaryOp::LessThan,
-                Token::GreaterThan => BinaryOp::GreaterThan,
+                Token::LAngleBracket => BinaryOp::LessThan,
+                Token::RAngleBracket => BinaryOp::GreaterThan,
                 Token::LessThanOrEqual => BinaryOp::LessThanOrEqual,
                 Token::GreaterThanOrEqual => BinaryOp::GreaterThanOrEqual,
             })
@@ -343,7 +347,11 @@ where
             .memoized();
 
         choice((
-            just(Token::Unit).ignored().map(|_| TermType::UnitLiteral),
+            term.clone()
+                .separated_by(just(Token::Comma))
+                .collect::<Vec<_>>()
+                .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket))
+                .map(|terms| TermType::Tuple(terms.into())),
             parse_let_box.map(TermType::LetBoxBinding),
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),

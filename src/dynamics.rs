@@ -6,10 +6,10 @@ pub type Ident = String;
 
 #[derive(Clone, Debug)]
 pub enum Term {
-    UnitLiteral,
     NilLiteral,
     BoolLiteral(bool),
     IntLiteral(Natural),
+    Tuple(im::Vector<Term>),
     Box(Bx),
     LocalVariable(Ident),
     GlobalVariable(Ident),

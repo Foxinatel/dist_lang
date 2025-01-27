@@ -7,7 +7,7 @@ use crate::dynamics::*;
 
 #[derive(Clone, Debug)]
 pub enum Value {
-    Unit,
+    Tuple(im::Vector<(Value, Env)>),
     Int(Integer),
     Bool(bool),
     List(List),
@@ -64,7 +64,14 @@ pub struct List(im::Vector<(Value, Env)>);
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Unit => write!(f, "<>"),
+            Value::Tuple(vals) => write!(
+                f,
+                "<{}>",
+                vals.iter()
+                    .map(|(val, _)| format!("{val}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Value::Int(val) => write!(f, "{val:?}"),
             Value::Bool(val) => write!(f, "{val:?}"),
             Value::Func(func) => write!(f, "{} -> (...)", func.binding),
@@ -149,7 +156,7 @@ impl std::fmt::Display for Env {
             "{{local: [{}], global: [{}]}}",
             self.local
                 .iter()
-                .map(|v| format!("({}: {})", v.0, v.1 .0))
+                .map(|v| format!("({}: {})", v.0, v.1.0))
                 .collect::<Vec<_>>()
                 .join(", "),
             self.global
@@ -163,6 +170,11 @@ impl std::fmt::Display for Env {
 
 #[derive(Debug)]
 enum Kont {
+    Tuple {
+        env: Env,
+        done: im::Vector<(Value, Env)>,
+        todo: im::Vector<Term>,
+    },
     Bind(Ident, Term, Env),
     BindBox(Ident, Term, Env),
     Arg(Term, Env),
@@ -354,22 +366,67 @@ impl Cek {
                             cont,
                         }
                     }
+                    Kont::Tuple {
+                        env,
+                        mut done,
+                        mut todo,
+                    } => {
+                        done.push_back((val, self.env.clone()));
+                        if let Some(nxt) = todo.pop_front() {
+                            cont.push(Kont::Tuple {
+                                env: env.clone(),
+                                done,
+                                todo,
+                            });
+                            Self {
+                                ctrl: Ctrl::Term(nxt),
+                                env,
+                                cont,
+                            }
+                        } else {
+                            Self {
+                                ctrl: Ctrl::Value(Value::Tuple(done)),
+                                env,
+                                cont,
+                            }
+                        }
+                    }
                 }
             }
-            Ctrl::Term(Term::UnitLiteral) => Self {
-                ctrl: Ctrl::Value(Value::Unit),
-                ..self
-            },
+            Ctrl::Term(Term::Tuple(mut terms)) => {
+                let mut cont = self.cont;
+                if let Some(fst) = terms.pop_front() {
+                    cont.push(Kont::Tuple {
+                        env: self.env.clone(),
+                        done: Default::default(),
+                        todo: terms,
+                    });
+                    Self {
+                        ctrl: Ctrl::Term(fst),
+                        env: self.env,
+                        cont,
+                    }
+                } else {
+                    Self {
+                        ctrl: Ctrl::Value(Value::Tuple(Default::default())),
+                        env: Default::default(),
+                        cont,
+                    }
+                }
+            }
             Ctrl::Term(Term::NilLiteral) => Self {
                 ctrl: Ctrl::Value(Value::List(Default::default())),
+                env: Default::default(),
                 ..self
             },
             Ctrl::Term(Term::IntLiteral(val)) => Self {
                 ctrl: Ctrl::Value(Value::Int(val.into())),
+                env: Default::default(),
                 ..self
             },
             Ctrl::Term(Term::BoolLiteral(val)) => Self {
                 ctrl: Ctrl::Value(Value::Bool(val)),
+                env: Default::default(),
                 ..self
             },
             Ctrl::Term(Term::Function(val)) => Self {

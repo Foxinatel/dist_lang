@@ -3,16 +3,15 @@ use std::rc::Rc;
 use chumsky::span::SimpleSpan;
 
 use crate::{
-    dynamics,
+    StaticError, UnaryMinus, dynamics,
     parser::{self, Append, BinaryOp, Term},
-    StaticError, UnaryMinus,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
-    Unit,
     Bool,
     Int,
+    Tuple(im::Vector<Type>),
     Mobile(Rc<Type>),
     List(Rc<Type>),
     Func(Rc<Type>, Rc<Type>),
@@ -21,9 +20,17 @@ pub enum Type {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Unit => write!(f, "<>"),
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
+            Type::Tuple(inner) => write!(
+                f,
+                "<{}>",
+                inner
+                    .iter()
+                    .map(|ty| format!("{ty}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Type::Mobile(inner) => write!(f, "[{inner}]"),
             Type::List(inner) => write!(f, "{{{inner}}}"),
             Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),
@@ -50,7 +57,15 @@ fn type_check_impl(
 ) -> Result<(Type, dynamics::Term), Vec<StaticError>> {
     match term.ty {
         parser::TermType::NilLiteral(ty) => Ok((Type::List(ty.into()), dynamics::Term::NilLiteral)),
-        parser::TermType::UnitLiteral => Ok((Type::Unit, dynamics::Term::UnitLiteral)),
+        parser::TermType::Tuple(terms) => {
+            let (tys, terms): (im::Vector<_>, im::Vector<_>) = terms
+                .into_iter()
+                .map(|term| type_check_impl(term, types.clone()))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .unzip();
+            Ok((Type::Tuple(tys), dynamics::Term::Tuple(terms)))
+        }
         parser::TermType::BoolLiteral(val) => Ok((Type::Bool, dynamics::Term::BoolLiteral(val))),
         parser::TermType::IntLiteral(val) => Ok((Type::Int, dynamics::Term::IntLiteral(val))),
         parser::TermType::Bracketed(term) => type_check_impl(*term, types),
@@ -111,7 +126,9 @@ fn type_check_impl(
             if arg_ty != *farg_ty {
                 return Err(vec![StaticError {
                     span: arg_span.into(),
-                    error: format!("Right side of application did not match function type. Expected {farg_ty}. Got {arg_ty}"),
+                    error: format!(
+                        "Right side of application did not match function type. Expected {farg_ty}. Got {arg_ty}"
+                    ),
                     help: None,
                     note: None,
                 }]);
@@ -294,7 +311,9 @@ fn type_check_impl(
             if !matches!(lhs_ty, Type::Int) {
                 errs.push(StaticError {
                     span: lhs_span.into(),
-                    error: format!("Left-hand side of binary expression does not evaluate to Int. Got {lhs_ty}"),
+                    error: format!(
+                        "Left-hand side of binary expression does not evaluate to Int. Got {lhs_ty}"
+                    ),
                     help: None,
                     note: None,
                 });
@@ -396,7 +415,9 @@ fn type_check_impl(
             if *list_ty_inner != item_ty {
                 return Err(vec![StaticError {
                     span: item_span.into(),
-                    error: format!("Right side of append does not match left side. Expected {list_ty_inner}. Got {item_ty}"),
+                    error: format!(
+                        "Right side of append does not match left side. Expected {list_ty_inner}. Got {item_ty}"
+                    ),
                     help: None,
                     note: None,
                 }]);
