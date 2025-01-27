@@ -1,7 +1,6 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use malachite::Integer;
-use rayon::Yield;
 
 use crate::dynamics::*;
 
@@ -90,52 +89,11 @@ impl std::fmt::Display for Value {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct MobileValue(Arc<OnceLock<(Value, Env)>>);
+mod mobile;
 
-impl MobileValue {
-    pub fn compute(mut term: Cek) -> Self {
-        let val = Arc::new(OnceLock::new());
-
-        let v = val.clone();
-        rayon::spawn(move || {
-            while term.finish().is_none() {
-                term = term.step()
-            }
-            let fin = term.finish().unwrap();
-            let env = term.env;
-            v.set((fin, env)).unwrap();
-        });
-
-        Self(val)
-    }
-}
-
-impl std::fmt::Display for MobileValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(val) = self.0.get() {
-            write!(f, "{}", val.0)
-        } else {
-            write!(f, "Uncomputed")
-        }
-    }
-}
-
-impl std::ops::Deref for MobileValue {
-    type Target = (Value, Env);
-
-    fn deref(&self) -> &Self::Target {
-        if let Some(v) = self.0.get() {
-            return v;
-        }
-        while let Some(Yield::Executed) = rayon::yield_now() {
-            if let Some(v) = self.0.get() {
-                return v;
-            }
-        }
-        self.0.wait()
-    }
-}
+use mobile::MobileValueBuilder as _;
+type MobileValue = Arc<dyn mobile::MobileValue + 'static>;
+type MobileValueBuilder = mobile::RayonMobileValueBuilder;
 
 #[derive(Debug)]
 enum Ctrl {
@@ -255,7 +213,7 @@ impl Cek {
                             global: self.env.global.clone(),
                             ..Env::default()
                         };
-                        let mv = MobileValue::compute(Self::with_global(
+                        let mv = MobileValueBuilder::compute(Self::with_global(
                             (*bx.body).clone(),
                             global_only.global.clone(),
                         ));
