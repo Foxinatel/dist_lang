@@ -6,7 +6,7 @@ use crate::dynamics::*;
 
 #[derive(Clone, Debug)]
 pub enum Value {
-    Tuple(im::Vector<(Value, Env)>),
+    Tuple(Tuple),
     Int(Integer),
     Bool(bool),
     List(List),
@@ -55,10 +55,21 @@ impl Value {
             todo!()
         }
     }
+
+    fn tuple(self) -> Tuple {
+        if let Self::Tuple(val) = self {
+            val
+        } else {
+            todo!()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct List(im::Vector<(Value, Env)>);
+
+#[derive(Clone, Debug)]
+pub struct Tuple(im::Vector<(Value, Env)>);
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -66,7 +77,7 @@ impl std::fmt::Display for Value {
             Value::Tuple(vals) => write!(
                 f,
                 "<{}>",
-                vals.iter()
+                vals.0.iter()
                     .map(|(val, _)| format!("{val}"))
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -152,6 +163,7 @@ enum Kont {
     },
     ResolvList(Term, Env),
     Index(List),
+    IndexTuple(u64),
 }
 
 #[derive(Debug)]
@@ -343,10 +355,19 @@ impl Cek {
                             }
                         } else {
                             Self {
-                                ctrl: Ctrl::Value(Value::Tuple(done)),
+                                ctrl: Ctrl::Value(Value::Tuple(Tuple(done))),
                                 env,
                                 cont,
                             }
+                        }
+                    }
+                    Kont::IndexTuple(ind) => {
+                        let Tuple(vals) = val.tuple();
+                        let (val, env) = vals[ind as usize].clone();
+                        Self {
+                            ctrl: Ctrl::Value(val),
+                            env,
+                            cont,
                         }
                     }
                 }
@@ -366,7 +387,7 @@ impl Cek {
                     }
                 } else {
                     Self {
-                        ctrl: Ctrl::Value(Value::Tuple(Default::default())),
+                        ctrl: Ctrl::Value(Value::Tuple(Tuple(im::Vector::new()))),
                         env: Default::default(),
                         cont,
                     }
@@ -510,6 +531,15 @@ impl Cek {
                 cont.push(Kont::ResolvList((*index).clone(), self.env.clone()));
                 Self {
                     ctrl: Ctrl::Term((*list).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::IndexTuple(IndexTuple { tuple, index })) => {
+                let mut cont = self.cont;
+                cont.push(Kont::IndexTuple(index));
+                Self {
+                    ctrl: Ctrl::Term((*tuple).clone()),
                     env: self.env,
                     cont,
                 }

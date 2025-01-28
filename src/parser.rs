@@ -2,9 +2,9 @@ use chumsky::{
     input::{Stream, ValueInput},
     prelude::*,
 };
-use malachite::{num::conversion::traits::FromSciString, Natural};
+use malachite::{Natural, num::conversion::traits::FromSciString};
 
-use crate::{types, StaticError};
+use crate::{StaticError, types};
 
 use logos::Logos;
 
@@ -46,6 +46,8 @@ pub(super) enum Token<'a> {
     Integer(Natural),
     #[token(",")]
     Comma,
+    #[token(".")]
+    Dot,
     #[token("[")]
     LSqBracket,
     #[token("]")]
@@ -127,6 +129,7 @@ pub enum TermType {
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
     Index(Index),
+    TupleIndex(TupleIndex),
 }
 
 #[derive(Debug)]
@@ -172,6 +175,12 @@ pub struct Append {
 pub struct Index {
     pub list: Box<Term>,
     pub index: Box<Term>,
+}
+
+#[derive(Debug)]
+pub struct TupleIndex {
+    pub tup: Box<Term>,
+    pub index: (Natural, SimpleSpan),
 }
 
 #[derive(Debug)]
@@ -352,6 +361,16 @@ where
                 .collect::<Vec<_>>()
                 .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket))
                 .map(|terms| TermType::Tuple(terms.into())),
+            term.clone()
+                .then_ignore(just(Token::Dot))
+                .then(select! { Token::Integer(ind) => ind})
+                .memoized()
+                .map_with(|(tup, ind), extra| {
+                    TermType::TupleIndex(TupleIndex {
+                        tup: Box::new(tup),
+                        index: (ind, extra.span()),
+                    })
+                }),
             parse_let_box.map(TermType::LetBoxBinding),
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),

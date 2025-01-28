@@ -3,7 +3,8 @@ use std::rc::Rc;
 use chumsky::span::SimpleSpan;
 
 use crate::{
-    StaticError, UnaryMinus, dynamics,
+    StaticError, UnaryMinus,
+    dynamics::{self, IndexTuple},
     parser::{self, Append, BinaryOp, Term},
 };
 
@@ -459,6 +460,42 @@ fn type_check_impl(
                 dynamics::Term::Index(crate::Index {
                     list: list_term.into(),
                     index: index_term.into(),
+                }),
+            ))
+        }
+        parser::TermType::TupleIndex(tuple_index) => {
+            let span = tuple_index.tup.span;
+            let (ty, term) = type_check_impl(*tuple_index.tup, types)?;
+            let ind: Result<u64, _> = (&tuple_index.index.0).try_into();
+            let Ok(ind) = ind else {
+                return Err(vec![StaticError {
+                    span: tuple_index.index.1.into(),
+                    error: String::from("Index too large"),
+                    help: None,
+                    note: None,
+                }]);
+            };
+            let Type::Tuple(typs) = ty else {
+                return Err(vec![StaticError {
+                    span: span.into(),
+                    error: format!("Expected tuple on left side of expression. Got {ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            };
+            if ind as usize >= typs.len() {
+                return Err(vec![StaticError {
+                    span: tuple_index.index.1.into(),
+                    error: format!("Invalid index {ind}, length of tuple was {}", typs.len()),
+                    help: None,
+                    note: None,
+                }]);
+            }
+            Ok((
+                typs[ind as usize].clone(),
+                dynamics::Term::IndexTuple(IndexTuple {
+                    tuple: term.into(),
+                    index: ind,
                 }),
             ))
         }
