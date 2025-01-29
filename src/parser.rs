@@ -90,6 +90,10 @@ pub(super) enum Token<'a> {
     NotEqualTo,
     #[token("=")]
     Bind,
+    #[token("type")]
+    Type,
+    #[token("as")]
+    As,
     #[token("let")]
     Let,
     #[token("box")]
@@ -112,7 +116,7 @@ pub(super) enum Token<'a> {
 
 #[derive(Debug)]
 pub enum TermType {
-    NilLiteral(types::Type),
+    NilLiteral,
     Tuple(Box<[Term]>),
     BoolLiteral(bool),
     IntLiteral(Natural),
@@ -130,6 +134,7 @@ pub enum TermType {
     Append(Append),
     Index(Index),
     TupleIndex(TupleIndex),
+    Ascription(Box<Term>, types::Type),
 }
 
 #[derive(Debug)]
@@ -354,23 +359,30 @@ where
                 index: Box::new(index),
             })
             .memoized();
+        let parse_tuple_index = term
+            .clone()
+            .then_ignore(just(Token::Dot))
+            .then(select! { Token::Integer(ind) => ind})
+            .memoized()
+            .map_with(|(tup, ind), extra| TupleIndex {
+                tup: Box::new(tup),
+                index: (ind, extra.span()),
+            });
+        let parse_tuple = term
+            .clone()
+            .separated_by(just(Token::Comma))
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket));
+        let parse_ascription = term
+            .clone()
+            .memoized()
+            .then_ignore(just(Token::As))
+            .then(parse_type());
 
         choice((
-            term.clone()
-                .separated_by(just(Token::Comma))
-                .collect::<Vec<_>>()
-                .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket))
-                .map(|terms| TermType::Tuple(terms.into())),
-            term.clone()
-                .then_ignore(just(Token::Dot))
-                .then(select! { Token::Integer(ind) => ind})
-                .memoized()
-                .map_with(|(tup, ind), extra| {
-                    TermType::TupleIndex(TupleIndex {
-                        tup: Box::new(tup),
-                        index: (ind, extra.span()),
-                    })
-                }),
+            parse_ascription.map(|(term, ty)| TermType::Ascription(Box::new(term), ty)),
+            parse_tuple.map(|terms| TermType::Tuple(terms.into())),
+            parse_tuple_index.map(TermType::TupleIndex),
             parse_let_box.map(TermType::LetBoxBinding),
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
@@ -389,10 +401,10 @@ where
             term.clone()
                 .delimited_by(just(Token::LBracket), just(Token::RBracket))
                 .map(|inner| TermType::Bracketed(Box::new(inner))),
-            parse_type()
-                .then_ignore(just(Token::LBrace))
-                .then_ignore(just(Token::RBrace))
-                .map(TermType::NilLiteral),
+            just(Token::LBrace)
+                .then(just(Token::RBrace))
+                .ignored()
+                .map(|_| TermType::NilLiteral),
             parse_var.map(TermType::Variable),
             parse_bool.map(TermType::BoolLiteral),
             parse_int.map(TermType::IntLiteral),

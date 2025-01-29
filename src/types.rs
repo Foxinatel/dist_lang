@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use chumsky::span::SimpleSpan;
 
 use crate::{
@@ -8,14 +6,46 @@ use crate::{
     parser::{self, Append, BinaryOp, Term},
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Type {
     Bool,
     Int,
     Tuple(im::Vector<Type>),
-    Mobile(Rc<Type>),
-    List(Rc<Type>),
-    Func(Rc<Type>, Rc<Type>),
+    Mobile(Box<Type>),
+    List(Box<Type>),
+    Func(Box<Type>, Box<Type>),
+    Undetermined,
+}
+
+impl Type {
+    pub fn unify(&mut self, other: &mut Self) -> bool {
+        match (self, other) {
+            (Type::Undetermined, Type::Undetermined) => {
+                todo!()
+            }
+            (this @ Type::Undetermined, other) => {
+                *this = other.clone();
+                true
+            }
+            (this, other @ Type::Undetermined) => {
+                *other = this.clone();
+                true
+            }
+            (Type::Bool, Type::Bool) => true,
+            (Type::Int, Type::Int) => true,
+            (Type::Tuple(v1), Type::Tuple(v2)) => {
+                (v1.len() == v2.len())
+                    && v1
+                        .iter_mut()
+                        .zip(v2.iter_mut())
+                        .all(|(t1, t2)| t1.unify(t2))
+            }
+            (Type::Mobile(t1), Type::Mobile(t2)) => t1.unify(t2),
+            (Type::List(t1), Type::List(t2)) => t1.unify(t2),
+            (Type::Func(a1, b1), Type::Func(a2, b2)) => a1.unify(a2) && b1.unify(b2),
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -35,6 +65,7 @@ impl std::fmt::Display for Type {
             Type::Mobile(inner) => write!(f, "[{inner}]"),
             Type::List(inner) => write!(f, "{{{inner}}}"),
             Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),
+            Type::Undetermined => write!(f, "???"),
         }
     }
 }
@@ -57,7 +88,10 @@ fn type_check_impl(
     types: TypeEnvironment,
 ) -> Result<(Type, dynamics::Term), Vec<StaticError>> {
     match term.ty {
-        parser::TermType::NilLiteral(ty) => Ok((Type::List(ty.into()), dynamics::Term::NilLiteral)),
+        parser::TermType::NilLiteral => Ok((
+            Type::List(Type::Undetermined.into()),
+            dynamics::Term::NilLiteral,
+        )),
         parser::TermType::Tuple(terms) => {
             let (tys, terms): (im::Vector<_>, im::Vector<_>) = terms
                 .into_iter()
@@ -111,9 +145,9 @@ fn type_check_impl(
         parser::TermType::Application(app) => {
             let (func_span, arg_span) = (app.func.span, app.arg.span);
             let (func_ty, func_term) = type_check_impl(*app.func, types.clone())?;
-            let (arg_ty, arg_term) = type_check_impl(*app.arg, types.clone())?;
+            let (mut arg_ty, arg_term) = type_check_impl(*app.arg, types.clone())?;
 
-            let Type::Func(farg_ty, ret_ty) = func_ty else {
+            let Type::Func(mut farg_ty, ret_ty) = func_ty else {
                 return Err(vec![StaticError {
                     span: func_span.into(),
                     error: format!(
@@ -124,11 +158,11 @@ fn type_check_impl(
                 }]);
             };
 
-            if arg_ty != *farg_ty {
+            if !arg_ty.unify(&mut farg_ty) {
                 return Err(vec![StaticError {
                     span: arg_span.into(),
                     error: format!(
-                        "Right side of application did not match function type. Expected {farg_ty}. Got {arg_ty}"
+                        "Right side of application did not match argument type. Expected {farg_ty}. Got {arg_ty}"
                     ),
                     help: None,
                     note: None,
@@ -147,8 +181,8 @@ fn type_check_impl(
             let c_span = if_else.cond.span;
             let (t_span, f_span) = (if_else.if_true.span, if_else.if_false.span);
             let (cond_ty, cond_term) = type_check_impl(*if_else.cond, types.clone())?;
-            let (true_ty, true_term) = type_check_impl(*if_else.if_true, types.clone())?;
-            let (false_ty, false_term) = type_check_impl(*if_else.if_false, types.clone())?;
+            let (mut true_ty, true_term) = type_check_impl(*if_else.if_true, types.clone())?;
+            let (mut false_ty, false_term) = type_check_impl(*if_else.if_false, types.clone())?;
 
             let mut errs = vec![];
             if !matches!(cond_ty, Type::Bool) {
@@ -159,7 +193,7 @@ fn type_check_impl(
                     note: None,
                 });
             }
-            if true_ty != false_ty {
+            if !true_ty.unify(&mut false_ty) {
                 errs.push(StaticError {
                     span: t_span.into(),
                     error: format!("True case: {true_ty}"),
@@ -265,14 +299,14 @@ fn type_check_impl(
                 }),
             ))
         }
-        parser::TermType::Fix(fix) => {
+        parser::TermType::Fix(mut fix) => {
             let mut new_types = types.clone();
             let body_span = fix.body.span;
             new_types.local.insert(
                 fix.binding.ident.clone(),
                 (fix.arg_type.clone(), fix.binding.span),
             );
-            let (body_ty, body_term) = type_check_impl(*fix.body, new_types)?;
+            let (mut body_ty, body_term) = type_check_impl(*fix.body, new_types)?;
 
             if !matches!(fix.arg_type, Type::Func(..)) {
                 return Err(vec![StaticError {
@@ -283,7 +317,7 @@ fn type_check_impl(
                 }]);
             }
 
-            if body_ty != fix.arg_type {
+            if !body_ty.unify(&mut fix.arg_type) {
                 return Err(vec![StaticError {
                     span: body_span.into(),
                     error: format!(
@@ -401,10 +435,10 @@ fn type_check_impl(
         }
         parser::TermType::Append(Append { list, item }) => {
             let (list_span, item_span) = (list.span, item.span);
-            let (list_ty, list_term) = type_check_impl(*list, types.clone())?;
-            let (item_ty, item_term) = type_check_impl(*item, types.clone())?;
+            let (mut list_ty, list_term) = type_check_impl(*list, types.clone())?;
+            let (mut item_ty, item_term) = type_check_impl(*item, types.clone())?;
 
-            let Type::List(list_ty_inner) = list_ty.clone() else {
+            let Type::List(list_ty_inner) = &mut list_ty else {
                 return Err(vec![StaticError {
                     span: list_span.into(),
                     error: format!("Left side of append was not a list type. Got {list_ty}"),
@@ -413,7 +447,7 @@ fn type_check_impl(
                 }]);
             };
 
-            if *list_ty_inner != item_ty {
+            if !list_ty_inner.unify(&mut item_ty) {
                 return Err(vec![StaticError {
                     span: item_span.into(),
                     error: format!(
@@ -499,9 +533,23 @@ fn type_check_impl(
                 }),
             ))
         }
+        parser::TermType::Ascription(term, mut asc) => {
+            let span = term.span;
+            let (mut ty, inner) = type_check_impl(*term, types)?;
+            if !ty.unify(&mut asc) {
+                return Err(vec![StaticError {
+                    span: span.into(),
+                    error: format!("Term does not match ascription. Expected {asc} Got {ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            }
+            Ok((ty, inner))
+        }
     }
 }
 
 pub fn type_check(term: Term) -> Result<dynamics::Term, Vec<StaticError>> {
-    type_check_impl(term, TypeEnvironment::default()).map(|(_, term)| term)
+    let (_, term) = type_check_impl(term, TypeEnvironment::default())?;
+    Ok(term)
 }
