@@ -499,6 +499,19 @@ fn type_check_impl(
                 }),
             ))
         }
+        parser::TermType::Ascription(term, asc) => {
+            let span = term.span;
+            let (ty, inner) = type_check_impl(*term, types)?;
+            if ty != asc {
+                return Err(vec![StaticError {
+                    span: span.into(),
+                    error: format!("Term does not match ascription. Expected {asc} Got {ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            }
+            Ok((ty, inner))
+        }
     }
 }
 

@@ -90,6 +90,8 @@ pub(super) enum Token<'a> {
     NotEqualTo,
     #[token("=")]
     Bind,
+    #[token("as")]
+    As,
     #[token("let")]
     Let,
     #[token("box")]
@@ -130,6 +132,7 @@ pub enum TermType {
     Append(Append),
     Index(Index),
     TupleIndex(TupleIndex),
+    Ascription(Box<Term>, types::Type),
 }
 
 #[derive(Debug)]
@@ -356,6 +359,11 @@ where
             .memoized();
 
         choice((
+            term.clone()
+                .memoized()
+                .then_ignore(just(Token::As))
+                .then(parse_type())
+                .map(|(term, ty)| TermType::Ascription(Box::new(term), ty)),
             term.clone()
                 .separated_by(just(Token::Comma))
                 .collect::<Vec<_>>()
