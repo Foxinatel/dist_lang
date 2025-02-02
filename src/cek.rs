@@ -13,6 +13,7 @@ pub enum Value {
     Func(Func),
     Box(Bx),
     Fix(Fix),
+    SumType(SumType),
 }
 
 impl Value {
@@ -63,6 +64,14 @@ impl Value {
             todo!()
         }
     }
+
+    fn sum_type(self) -> SumType {
+        if let Self::SumType(val) = self {
+            val
+        } else {
+            todo!()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -71,13 +80,20 @@ pub struct List(im::Vector<(Value, Env)>);
 #[derive(Clone, Debug)]
 pub struct Tuple(im::Vector<(Value, Env)>);
 
+#[derive(Clone, Debug)]
+pub struct SumType {
+    pub ctor: Arc<String>,
+    pub inner: Arc<Value>,
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Tuple(vals) => write!(
                 f,
                 "<{}>",
-                vals.0.iter()
+                vals.0
+                    .iter()
                     .map(|(val, _)| format!("{val}"))
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -96,6 +112,7 @@ impl std::fmt::Display for Value {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+            Value::SumType(sum) => write!(f, "{} {:?}", sum.ctor, sum.inner),
         }
     }
 }
@@ -164,6 +181,8 @@ enum Kont {
     ResolvList(Term, Env),
     Index(List),
     IndexTuple(u64),
+    Match(im::HashMap<String, Arm>, Env),
+    Tag(Arc<String>),
 }
 
 #[derive(Debug)]
@@ -370,6 +389,24 @@ impl Cek {
                             cont,
                         }
                     }
+                    Kont::Match(mut arms, mut env) => {
+                        let sum = val.sum_type();
+                        let Arm { bind, body } = arms.remove(&*sum.ctor).unwrap();
+                        env.local.insert(bind, ((*sum.inner).clone(), self.env));
+                        Self {
+                            ctrl: Ctrl::Term(body),
+                            env,
+                            cont,
+                        }
+                    }
+                    Kont::Tag(tag) => Self {
+                        ctrl: Ctrl::Value(Value::SumType(SumType {
+                            ctor: tag,
+                            inner: val.into(),
+                        })),
+                        env: self.env,
+                        cont,
+                    },
                 }
             }
             Ctrl::Term(Term::Tuple(mut terms)) => {
@@ -540,6 +577,27 @@ impl Cek {
                 cont.push(Kont::IndexTuple(index));
                 Self {
                     ctrl: Ctrl::Term((*tuple).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::Tag(Tag { tag, body })) => {
+                let mut cont = self.cont;
+                cont.push(Kont::Tag(tag));
+                Self {
+                    ctrl: Ctrl::Term((*body).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::Match(Match { expr, arms })) => {
+                let mut cont = self.cont;
+                cont.push(Kont::Match(
+                    arms.iter().cloned().collect(),
+                    self.env.clone(),
+                ));
+                Self {
+                    ctrl: Ctrl::Term((*expr).clone()),
                     env: self.env,
                     cont,
                 }

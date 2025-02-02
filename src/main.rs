@@ -11,7 +11,7 @@ mod dynamics;
 mod parser;
 mod types;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct StaticError {
     pub span: std::ops::Range<usize>,
     pub error: String,

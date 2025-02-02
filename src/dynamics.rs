@@ -23,7 +23,9 @@ pub enum Term {
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
     Index(Index),
-    IndexTuple(IndexTuple)
+    IndexTuple(IndexTuple),
+    Tag(Tag),
+    Match(Match),
 }
 
 #[derive(Clone, Debug)]
@@ -78,7 +80,7 @@ pub struct Index {
 #[derive(Clone, Debug)]
 pub struct IndexTuple {
     pub tuple: Arc<Term>,
-    pub index: u64
+    pub index: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -104,3 +106,21 @@ pub struct BinaryPrimitive {
 
 #[derive(Clone, Debug)]
 pub struct UnaryMinus(pub Arc<Term>);
+
+#[derive(Clone, Debug)]
+pub struct Tag {
+    pub tag: Arc<String>,
+    pub body: Arc<Term>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Match {
+    pub expr: Arc<Term>,
+    pub arms: Arc<[(String, Arm)]>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Arm {
+    pub bind: Ident,
+    pub body: Term,
+}

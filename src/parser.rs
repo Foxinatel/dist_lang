@@ -40,8 +40,10 @@ impl std::fmt::Display for LexingError {
 #[logos(skip r"([ \t\n\f]|%[^%]*%)+")] // Ignore this regex pattern between tokens
 #[logos(error = LexingError)]
 pub(super) enum Token<'a> {
-    #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
-    Ident(&'a str),
+    #[regex("[a-z][a-zA-Z0-9_]*")]
+    IdentLower(&'a str),
+    #[regex("[A-Z][a-zA-Z0-9_]*")]
+    IdentUpper(&'a str),
     #[regex("[0-9]+", |lex| Natural::from_sci_string(lex.slice()))]
     Integer(Natural),
     #[token(",")]
@@ -68,6 +70,8 @@ pub(super) enum Token<'a> {
     Append,
     #[token("->")]
     RArrow,
+    #[token("=>")]
+    RDArrow,
     #[token("+")]
     Add,
     #[token("-")]
@@ -90,6 +94,8 @@ pub(super) enum Token<'a> {
     NotEqualTo,
     #[token("=")]
     Bind,
+    #[token("match")]
+    Match,
     #[token("as")]
     As,
     #[token("let")]
@@ -133,6 +139,8 @@ pub enum TermType {
     Index(Index),
     TupleIndex(TupleIndex),
     Ascription(Box<Term>, types::Type),
+    Ctor(Ctor),
+    Match(Box<Term>, Vec<MatchArm>),
 }
 
 #[derive(Debug)]
@@ -159,6 +167,19 @@ pub struct IfElse {
     pub cond: Box<Term>,
     pub if_true: Box<Term>,
     pub if_false: Box<Term>,
+}
+
+#[derive(Debug)]
+pub struct Ctor {
+    pub ctor: Ident,
+    pub term: Box<Term>,
+}
+
+#[derive(Debug)]
+pub struct MatchArm {
+    pub ctor: Ident,
+    pub ident: Ident,
+    pub body: Term,
 }
 
 #[derive(Debug)]
@@ -239,8 +260,8 @@ where
                     .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket))
                     .map(|tys| types::Type::Tuple(tys.into())),
                 select! {
-                    Token::Ident("Bool") => types::Type::Bool,
-                    Token::Ident("Int") => types::Type::Int,
+                    Token::IdentUpper("Bool") => types::Type::Bool,
+                    Token::IdentUpper("Int") => types::Type::Int,
                 },
             ))
         },
@@ -258,13 +279,21 @@ where
             Token::False => false,
         };
         let parse_box = just(Token::Box).ignore_then(term.clone());
-        let parse_var = (select! { Token::Ident(name) => name }).try_map_with(|v, e| {
-            Ok(Ident {
-                ident: String::from(v),
-                span: e.span(),
-            })
-        });
-        let parse_func = parse_var
+        let parse_ident_lower =
+            (select! { Token::IdentLower(name) => name }).try_map_with(|v, e| {
+                Ok(Ident {
+                    ident: String::from(v),
+                    span: e.span(),
+                })
+            });
+        let parse_ident_upper =
+            (select! { Token::IdentUpper(name) => name }).try_map_with(|v, e| {
+                Ok(Ident {
+                    ident: String::from(v),
+                    span: e.span(),
+                })
+            });
+        let parse_func = parse_ident_lower
             .then_ignore(just(Token::Colon))
             .then(parse_type())
             .delimited_by(just(Token::Bar), just(Token::Bar))
@@ -294,7 +323,7 @@ where
                 if_false: Box::new(if_false),
             });
         let parse_let = just(Token::Let)
-            .ignore_then(parse_var)
+            .ignore_then(parse_ident_lower)
             .then_ignore(just(Token::Bind))
             .then(term.clone())
             .then_ignore(just(Token::In))
@@ -306,7 +335,7 @@ where
             });
         let parse_let_box = just(Token::Let)
             .ignore_then(just(Token::Box))
-            .ignore_then(parse_var)
+            .ignore_then(parse_ident_lower)
             .then_ignore(just(Token::Bind))
             .then(term.clone())
             .then_ignore(just(Token::In))
@@ -357,8 +386,27 @@ where
                 index: Box::new(index),
             })
             .memoized();
+        let parse_match = just(Token::Match)
+            .ignore_then(term.clone())
+            .then_ignore(just(Token::Bar))
+            .then(
+                parse_ident_upper
+                    .then(parse_ident_lower)
+                    .then_ignore(just(Token::RDArrow))
+                    .then(term.clone())
+                    .map(|((ctor, ident), body)| MatchArm { ctor, ident, body })
+                    .separated_by(just(Token::Bar))
+                    .collect::<Vec<_>>(),
+            );
+        let parse_ctor = parse_ident_upper
+            .then(term.clone())
+            .map(|(ctor, term)| Ctor {
+                ctor,
+                term: Box::new(term),
+            });
 
         choice((
+            parse_ctor.map(TermType::Ctor),
             term.clone()
                 .memoized()
                 .then_ignore(just(Token::As))
@@ -382,6 +430,7 @@ where
             parse_let_box.map(TermType::LetBoxBinding),
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
+            parse_match.map(|(term, arms)| TermType::Match(Box::new(term), arms)),
             parse_appl.map(TermType::Application),
             just(Token::Fix)
                 .ignore_then(parse_func.clone())
@@ -401,7 +450,7 @@ where
                 .then_ignore(just(Token::LBrace))
                 .then_ignore(just(Token::RBrace))
                 .map(TermType::NilLiteral),
-            parse_var.map(TermType::Variable),
+            parse_ident_lower.map(TermType::Variable),
             parse_bool.map(TermType::BoolLiteral),
             parse_int.map(TermType::IntLiteral),
         ))

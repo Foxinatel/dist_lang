@@ -4,7 +4,7 @@ use chumsky::span::SimpleSpan;
 
 use crate::{
     StaticError, UnaryMinus,
-    dynamics::{self, IndexTuple},
+    dynamics::{self, IndexTuple, Match},
     parser::{self, Append, BinaryOp, Term},
 };
 
@@ -16,6 +16,7 @@ pub enum Type {
     Mobile(Rc<Type>),
     List(Rc<Type>),
     Func(Rc<Type>, Rc<Type>),
+    Sum(Rc<String>, im::Vector<(String, Type)>),
 }
 
 impl std::fmt::Display for Type {
@@ -35,14 +36,31 @@ impl std::fmt::Display for Type {
             Type::Mobile(inner) => write!(f, "[{inner}]"),
             Type::List(inner) => write!(f, "{{{inner}}}"),
             Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),
+            Type::Sum(name, ..) => write!(f, "{name}"),
         }
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct TypeEnvironment {
+    sum_types: im::HashMap<String, im::Vector<(String, Type)>>,
     local: im::HashMap<String, (Type, SimpleSpan)>,
     global: im::HashMap<String, (Type, SimpleSpan)>,
+}
+
+impl Default for TypeEnvironment {
+    fn default() -> Self {
+        let mut sums = im::HashMap::<_, _>::default();
+        sums.insert(String::from("Option"), im::vector![
+            (String::from("Some"), Type::Int),
+            (String::from("None"), Type::Tuple(im::vector![])),
+        ]);
+        Self {
+            sum_types: sums,
+            local: Default::default(),
+            global: Default::default(),
+        }
+    }
 }
 
 impl TypeEnvironment {
@@ -511,6 +529,147 @@ fn type_check_impl(
                 }]);
             }
             Ok((ty, inner))
+        }
+        parser::TermType::Ctor(ctor) => {
+            let Some((ty_name, inner_variant_type)) =
+                types.sum_types.iter().find_map(|(name, variants)| {
+                    variants.iter().find_map(|(find_ctor, ty)| {
+                        (*find_ctor == ctor.ctor.ident).then_some((name, ty))
+                    })
+                })
+            else {
+                return Err(vec![StaticError {
+                    span: ctor.ctor.span.into(),
+                    error: format!(
+                        "Invalid ctor: {} does not belong to any known type",
+                        ctor.ctor.ident
+                    ),
+                    help: None,
+                    note: None,
+                }]);
+            };
+
+            let span = ctor.term.span.into();
+            let (ty, term) = type_check_impl(*ctor.term, types.clone())?;
+
+            if ty != *inner_variant_type {
+                return Err(vec![StaticError {
+                    span,
+                    error: format!("Expected type {inner_variant_type}, Got {ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            }
+
+            Ok((
+                Type::Sum(
+                    Rc::new(ty_name.clone()),
+                    types.sum_types.get(ty_name).unwrap().clone(),
+                ),
+                dynamics::Term::Tag(dynamics::Tag {
+                    tag: ctor.ctor.ident.into(),
+                    body: term.into(),
+                }),
+            ))
+        }
+        parser::TermType::Match(expr, match_arms) => {
+            let expr_span = expr.span;
+            let (expr_ty, expr_term) = type_check_impl(*expr, types.clone())?;
+
+            let Type::Sum(sum_ty_name, sum_ty_variants) = expr_ty else {
+                return Err(vec![StaticError {
+                    span: expr_span.into(),
+                    error: format!("Expected sum type to match on. Got {expr_ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            };
+
+            let mut match_arms_iter = match_arms.into_iter();
+
+            let (fst_ty, fst_arm) = {
+                let arm = match_arms_iter.next().unwrap();
+
+                let Some(ty) = sum_ty_variants
+                    .iter()
+                    .find_map(|(nm, ty)| (*nm == arm.ctor.ident).then_some(ty))
+                else {
+                    return Err(vec![StaticError {
+                        span: arm.ctor.span.into(),
+                        error: format!(
+                            "Ctor {} is not valid on type {sum_ty_name}",
+                            arm.ctor.ident
+                        ),
+                        help: None,
+                        note: None,
+                    }]);
+                };
+
+                let mut types = types.clone();
+                types
+                    .local
+                    .insert(arm.ident.ident.clone(), (ty.clone(), arm.ident.span));
+                type_check_impl(arm.body, types).map(|(ty, term)| {
+                    (
+                        ty,
+                        (arm.ctor.ident, dynamics::Arm {
+                            bind: arm.ident.ident,
+                            body: term,
+                        }),
+                    )
+                })?
+            };
+
+            let match_terms: Vec<_> = [Ok(fst_arm)]
+                .into_iter()
+                .chain(match_arms_iter.map(|arm| {
+                    let Some(ty) = sum_ty_variants
+                        .iter()
+                        .find_map(|(nm, ty)| (*nm == arm.ctor.ident).then_some(ty))
+                    else {
+                        return Err(vec![StaticError {
+                            span: arm.ctor.span.into(),
+                            error: format!(
+                                "Ctor {} is not valid on type {sum_ty_name}",
+                                arm.ctor.ident
+                            ),
+                            help: None,
+                            note: None,
+                        }]);
+                    };
+
+                    let body_span = arm.body.span;
+                    let mut types = types.clone();
+                    types
+                        .local
+                        .insert(arm.ident.ident.clone(), (ty.clone(), arm.ident.span));
+                    let (ty, term) = type_check_impl(arm.body, types)?;
+
+                    if ty != fst_ty {
+                        return Err(vec![StaticError {
+                            span: body_span.into(),
+                            error: format!(
+                                "Match arms have inconsistent types. Expected {fst_ty}. Got {ty}"
+                            ),
+                            help: None,
+                            note: None,
+                        }]);
+                    }
+
+                    Ok((arm.ctor.ident, dynamics::Arm {
+                        bind: arm.ident.ident,
+                        body: term,
+                    }))
+                }))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok((
+                fst_ty,
+                dynamics::Term::Match(Match {
+                    expr: expr_term.into(),
+                    arms: match_terms.into(),
+                }),
+            ))
         }
     }
 }
