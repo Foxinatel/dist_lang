@@ -48,6 +48,8 @@ pub(super) enum Token<'a> {
     Integer(Natural),
     #[token(",")]
     Comma,
+    #[token("..")]
+    Range,
     #[token(".")]
     Dot,
     #[token("[")]
@@ -129,6 +131,7 @@ pub enum TermType {
     Variable(Ident),
     Function(Func),
     Application(Application),
+    Length(Box<Term>),
     IfElse(IfElse),
     LetBinding(LetBinding),
     LetBoxBinding(LetBinding),
@@ -137,6 +140,7 @@ pub enum TermType {
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
     Index(Index),
+    Slice(Slice),
     TupleIndex(TupleIndex),
     Ascription(Box<Term>, types::Type),
     Ctor(Ctor),
@@ -199,6 +203,13 @@ pub struct Append {
 pub struct Index {
     pub list: Box<Term>,
     pub index: Box<Term>,
+}
+
+#[derive(Debug)]
+pub struct Slice {
+    pub list: Box<Term>,
+    pub lower: Option<Box<Term>>,
+    pub upper: Option<Box<Term>>,
 }
 
 #[derive(Debug)]
@@ -306,7 +317,7 @@ where
             });
         let parse_appl = term
             .clone()
-            .then(term.clone())
+            .then(term.clone().delimited_by(just(Token::LBracket), just(Token::RBracket)))
             .map(|(func, arg)| Application {
                 func: Box::new(func),
                 arg: Box::new(arg),
@@ -387,6 +398,22 @@ where
                 index: Box::new(index),
             })
             .memoized();
+        let parse_slice = term
+            .clone()
+            .then(
+                (term
+                    .clone()
+                    .or_not()
+                    .then_ignore(just(Token::Range))
+                    .then(term.clone().or_not()))
+                .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket)),
+            )
+            .map(|(list, (lower, upper))| Slice {
+                list: Box::new(list),
+                lower: lower.map(Box::new),
+                upper: upper.map(Box::new),
+            })
+            .memoized();
         let parse_match = just(Token::Match)
             .ignore_then(term.clone())
             .then_ignore(just(Token::Bar))
@@ -432,15 +459,19 @@ where
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
             parse_match.map(|(term, arms)| TermType::Match(Box::new(term), arms)),
-            parse_appl.map(TermType::Application),
             just(Token::Fix)
                 .ignore_then(parse_func.clone())
                 .map(TermType::Fix),
             parse_func.map(TermType::Function),
             parse_box.map(|t| TermType::Box(Box::new(t))),
-            parse_append.map(TermType::Append),
-            parse_index.map(TermType::Index),
             parse_binary_primitive.map(TermType::BinaryPrimitive),
+            term.clone()
+                .delimited_by(just(Token::Bar), just(Token::Bar))
+                .map(|term| TermType::Length(Box::new(term))),
+            parse_appl.map(TermType::Application),
+            parse_slice.map(TermType::Slice),
+            parse_index.map(TermType::Index),
+            parse_append.map(TermType::Append),
             just(Token::Minus)
                 .ignore_then(term.clone())
                 .map(|t| TermType::UnaryMinus(Box::new(t))),
@@ -481,7 +512,7 @@ pub fn generate_static_ast(input: &str) -> Result<Term, Vec<StaticError>> {
         .into_iter()
         .map(|(tok, span)| (tok.unwrap(), span.into()));
 
-    let token_stream = Stream::from_iter(tokens).spanned(SimpleSpan::new(input.len(), input.len()));
+    let token_stream = Stream::from_iter(tokens).map((0..input.len()).into(), |x| x);
 
     let (output, errs) = parse_term().parse(token_stream).into_output_errors();
 

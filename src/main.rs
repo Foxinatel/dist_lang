@@ -3,6 +3,8 @@
 #![feature(fn_traits)]
 #![feature(unboxed_closures)]
 
+use std::time::Instant;
+
 use ariadne::*;
 
 use cek::Cek;
@@ -82,8 +84,17 @@ fn main() {
     let file = std::env::args().nth(1).expect("file expected as first arg");
     let src = std::fs::read_to_string(&file).unwrap();
 
+    let c1 = Instant::now();
+
     let ast_static = unwrap_static(parser::generate_static_ast(&src), &file, &src);
+
+    let c2 = Instant::now();
+    println!("Parsing done in {:?}", c2 - c1);
+
     let ast_dynamic = unwrap_static(types::type_check(ast_static), &file, &src);
+
+    let c3 = Instant::now();
+    println!("Static pass done in {:?}", c3 - c2);
 
     rayon::ThreadPoolBuilder::new().build_global().unwrap();
 

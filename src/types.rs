@@ -196,9 +196,9 @@ fn type_check_impl(
         }
         parser::TermType::Variable(var) => {
             if let Some((ty, _)) = types.local.get(&var.ident) {
-                Ok((ty.clone(), dynamics::Term::LocalVariable(var.ident)))
+                Ok((ty.clone(), dynamics::Term::LocalVariable(var.ident.into())))
             } else if let Some((ty, _)) = types.global.get(&var.ident) {
-                Ok((ty.clone(), dynamics::Term::GlobalVariable(var.ident)))
+                Ok((ty.clone(), dynamics::Term::GlobalVariable(var.ident.into())))
             } else {
                 let err = TypeError::MissingVariable { ident: var.ident };
                 StaticError::new(term.span, err).into()
@@ -215,7 +215,7 @@ fn type_check_impl(
             Ok((
                 Type::Func(func.arg_type.into(), body_ty.into()),
                 dynamics::Term::Function(dynamics::FuncTerm {
-                    binding: func.binding.ident,
+                    binding: func.binding.ident.into(),
                     body: body_term.into(),
                 }),
             ))
@@ -298,7 +298,7 @@ fn type_check_impl(
             Ok((
                 body_ty,
                 dynamics::Term::LetBinding(dynamics::LetBinding {
-                    binding: let_binding.binding.ident,
+                    binding: let_binding.binding.ident.into(),
                     expr: ev_term.into(),
                     body: body_term.into(),
                 }),
@@ -332,7 +332,7 @@ fn type_check_impl(
             Ok((
                 body_ty,
                 dynamics::Term::LetBoxBinding(dynamics::LetBinding {
-                    binding: let_binding.binding.ident,
+                    binding: let_binding.binding.ident.into(),
                     expr: ev_term.into(),
                     body: body_term.into(),
                 }),
@@ -362,8 +362,8 @@ fn type_check_impl(
 
             Ok((
                 fix.arg_type,
-                dynamics::Term::Fix(crate::Fix {
-                    binding: fix.binding.ident,
+                dynamics::Term::Fix(crate::FuncTerm {
+                    binding: fix.binding.ident.into(),
                     body: body_term.into(),
                 }),
             ))
@@ -647,7 +647,7 @@ fn type_check_impl(
                     (
                         ty,
                         (arm.ctor.ident, dynamics::Arm {
-                            bind: arm.ident.ident,
+                            bind: arm.ident.ident.into(),
                             body: term,
                         }),
                     )
@@ -684,7 +684,7 @@ fn type_check_impl(
                     }
 
                     Ok((arm.ctor.ident, dynamics::Arm {
-                        bind: arm.ident.ident,
+                        bind: arm.ident.ident.into(),
                         body: term,
                     }))
                 }))
@@ -697,6 +697,75 @@ fn type_check_impl(
                     arms: match_terms.into(),
                 }),
             ))
+        }
+        parser::TermType::Slice(parser::Slice { list, lower, upper }) => {
+            let list_span = list.span;
+            let (list_ty, list_term) = type_check_impl(*list, types.clone())?;
+
+            let Type::List(_) = list_ty.clone() else {
+                return Err(vec![StaticError {
+                    span: list_span.into(),
+                    error: format!("Left side of index was not a list type. Got {list_ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            };
+
+            let lower = if let Some(term) = lower {
+                let sp = term.span;
+                let (ty, lower_term) = type_check_impl(*term, types.clone())?;
+                if !matches!(ty, Type::Int) {
+                    return Err(vec![StaticError {
+                        span: sp.into(),
+                        error: format!("Lower bound of Int. Got {ty}"),
+                        help: None,
+                        note: None,
+                    }]);
+                }
+                Some(lower_term.into())
+            } else {
+                None
+            };
+
+            let upper = if let Some(term) = upper {
+                let sp = term.span;
+                let (ty, upper_term) = type_check_impl(*term, types.clone())?;
+                if !matches!(ty, Type::Int) {
+                    return Err(vec![StaticError {
+                        span: sp.into(),
+                        error: format!("Right side of index was not an Int. Got {ty}"),
+                        help: None,
+                        note: None,
+                    }]);
+                }
+                Some(upper_term.into())
+            } else {
+                None
+            };
+
+            Ok((
+                list_ty,
+                dynamics::Term::Slice(crate::Slice {
+                    list: list_term.into(),
+                    lower,
+                    upper,
+                }),
+            ))
+        }
+        parser::TermType::Length(list) => {
+            let list_span = list.span;
+            let (list_ty, list_term) = type_check_impl(*list, types.clone())?;
+
+            let Type::List(_) = list_ty.clone() else {
+                return Err(vec![StaticError {
+                    span: list_span.into(),
+                    error: format!("Left side of index was not a list type. Got {list_ty}"),
+                    help: None,
+                    note: None,
+                }]);
+            };
+
+            Ok((Type::Int, dynamics::Term::Length(list_term.into())))
         }
     }
 }

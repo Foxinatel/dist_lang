@@ -90,6 +90,21 @@ enum Kont {
     IndexTuple(u64),
     Match(im::HashMap<String, Arm>, Env),
     Tag(Arc<String>),
+    Len,
+    Slice1 {
+        lower: Option<Term>,
+        upper: Option<Term>,
+        env: Env,
+    },
+    Slice2 {
+        list: List,
+        upper: Option<Term>,
+        env: Env,
+    },
+    Slice3 {
+        list: List,
+        lower: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -124,7 +139,7 @@ impl Cek {
         match self.ctrl {
             // Dynamic: Fix-Step
             Ctrl::Value(Value::Fix(fix)) => {
-                let mut nu_env = self.env.clone();
+                let mut nu_env = fix.env.clone();
                 let nu_fix = Value::Fix(fix.clone());
                 nu_env.local.insert(fix.binding, nu_fix);
                 Self {
@@ -233,7 +248,7 @@ impl Cek {
                         cont.push(Kont::Push(val.list()));
                         Self {
                             ctrl: Ctrl::Term(term),
-                            env: env.clone(),
+                            env,
                             cont,
                         }
                     }
@@ -251,7 +266,7 @@ impl Cek {
                         cont.push(Kont::Index(val.list()));
                         Self {
                             ctrl: Ctrl::Term(term),
-                            env: env.clone(),
+                            env,
                             cont,
                         }
                     }
@@ -322,6 +337,72 @@ impl Cek {
                         env: Default::default(),
                         cont,
                     },
+                    Kont::Len => Self {
+                        ctrl: Ctrl::Value(Value::Int(val.list().0.len().into())),
+                        env: Default::default(),
+                        cont,
+                    },
+                    Kont::Slice1 { lower, upper, env } => {
+                        if let Some(lower) = lower {
+                            cont.push(Kont::Slice2 {
+                                list: val.list(),
+                                upper,
+                                env: env.clone(),
+                            });
+                            Self {
+                                ctrl: Ctrl::Term(lower),
+                                env,
+                                cont,
+                            }
+                        } else if let Some(upper) = upper {
+                            cont.push(Kont::Slice3 {
+                                list: val.list(),
+                                lower: 0,
+                            });
+                            Self {
+                                ctrl: Ctrl::Term(upper),
+                                env,
+                                cont,
+                            }
+                        } else {
+                            let List(vals) = val.list();
+                            Self {
+                                ctrl: Ctrl::Value(Value::List(List(vals.clone()))),
+                                env,
+                                cont,
+                            }
+                        }
+                    }
+                    Kont::Slice2 { list, upper, env } => {
+                        if let Some(upper) = upper {
+                            cont.push(Kont::Slice3 { list, lower: 0 });
+                            Self {
+                                ctrl: Ctrl::Term(upper),
+                                env,
+                                cont,
+                            }
+                        } else {
+                            let List(mut vals) = list;
+                            let ind: usize = (&val.int()).try_into().unwrap();
+                            Self {
+                                ctrl: Ctrl::Value(Value::List(List(vals.slice(ind..)))),
+                                env,
+                                cont,
+                            }
+                        }
+                    }
+                    Kont::Slice3 {
+                        list: List(mut vals),
+                        lower,
+                    } => {
+                        let upper: usize = (&val.int()).try_into().unwrap();
+                        let slice = vals.slice((lower as usize)..upper);
+                        Self {
+                            ctrl: Ctrl::Value(Value::List(List(slice))),
+                            env: Default::default(),
+                            cont,
+                        }
+                    }
                 }
             }
             Ctrl::Term(Term::Tuple(mut terms)) => {
@@ -384,14 +465,18 @@ impl Cek {
                 cont,
             },
             // Dynamic: Fix
-            Ctrl::Term(Term::Fix(fix @ Fix { .. })) => Self {
-                ctrl: Ctrl::Value(Value::Fix(fix)),
+            Ctrl::Term(Term::Fix(FuncTerm { binding, body })) => Self {
+                ctrl: Ctrl::Value(Value::Fix(Func {
+                    binding,
+                    body,
+                    env: self.env,
+                })),
                 env: Default::default(),
                 cont,
             },
             // Dynamic: Local
-            Ctrl::Term(Term::LocalVariable(ident)) => {
-                let Some(val) = self.env.local.get(&ident).cloned() else {
+            Ctrl::Term(Term::LocalVariable(ref ident)) => {
+                let Some(val) = self.env.local.get(ident).cloned() else {
                     panic!(
                         "Could not find local variable {ident} in scope {}",
                         self.env
@@ -532,6 +617,26 @@ impl Cek {
                 ));
                 Self {
                     ctrl: Ctrl::Term((*expr).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::Slice(Slice { list, lower, upper })) => {
+                cont.push(Kont::Slice1 {
+                    lower: lower.as_deref().cloned(),
+                    upper: upper.as_deref().cloned(),
+                    env: self.env.clone(),
+                });
+                Self {
+                    ctrl: Ctrl::Term((*list).clone()),
+                    env: self.env,
+                    cont,
+                }
+            }
+            Ctrl::Term(Term::Length(list)) => {
+                cont.push(Kont::Len);
+                Self {
+                    ctrl: Ctrl::Term((*list).clone()),
                     env: self.env,
                     cont,
                 }

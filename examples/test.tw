@@ -1,0 +1,5 @@
+let a = 5 in
+let test = fix |f: Int -> Int|
+    |v: Int| a
+in
+test 3

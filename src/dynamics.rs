@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use malachite::{Integer, Natural};
 
-pub type Ident = String;
+pub type Ident = Arc<str>;
 
 pub trait Mobile:
     std::fmt::Display + std::fmt::Debug + std::ops::Deref<Target = Value> + Sync + Send
@@ -20,7 +20,7 @@ pub enum Value {
     SumType(SumType),
     Box(Bx),
     Func(Func),
-    Fix(Fix),
+    Fix(Func),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -120,14 +120,16 @@ pub enum Term {
     IfElse(IfElse),
     LetBinding(LetBinding),
     LetBoxBinding(LetBinding),
-    Fix(Fix),
+    Fix(FuncTerm),
     UnaryMinus(UnaryMinus),
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
     Index(Index),
+    Slice(Slice),
     IndexTuple(IndexTuple),
     Tag(Tag),
     Match(Match),
+    Length(Arc<Term>),
 }
 
 pub type GlobalEnv = im::HashMap<Ident, MobileValue>;
@@ -165,12 +167,6 @@ pub struct LetBinding {
 }
 
 #[derive(Clone, Debug)]
-pub struct Fix {
-    pub binding: Ident,
-    pub body: Arc<Term>,
-}
-
-#[derive(Clone, Debug)]
 pub struct BxTerm {
     pub body: Arc<Term>,
 }
@@ -185,6 +181,13 @@ pub struct Append {
 pub struct Index {
     pub list: Arc<Term>,
     pub index: Arc<Term>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Slice {
+    pub list: Arc<Term>,
+    pub lower: Option<Arc<Term>>,
+    pub upper: Option<Arc<Term>>,
 }
 
 #[derive(Clone, Debug)]
