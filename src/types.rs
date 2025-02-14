@@ -1,11 +1,11 @@
-use std::rc::Rc;
+use std::{collections::HashSet, rc::Rc};
 
 use chumsky::span::SimpleSpan;
 
 use crate::{
     StaticError, UnaryMinus,
     dynamics::{self, IndexTuple, Match},
-    parser::{self, Append, BinaryOp, Term},
+    parser::{self, Append, BinaryOp, MatchArm, Term},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,7 +36,7 @@ impl std::fmt::Display for Type {
             Type::Mobile(inner) => write!(f, "[{inner}]"),
             Type::List(inner) => write!(f, "{{{inner}}}"),
             Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),
-            Type::Sum(name, ..) => write!(f, "{name}"),
+            Type::Sum(name) => write!(f, "{name}"),
         }
     }
 }
@@ -590,6 +590,39 @@ fn type_check_impl(
             };
 
             let sum_ty_variants = types.sum_types.get(&*sum_ty_name).unwrap();
+
+            {
+                let mut hs: HashSet<&str> = HashSet::new();
+                for MatchArm { ctor, .. } in &match_arms {
+                    if !hs.insert(&ctor.ident) {
+                        return Err(vec![StaticError {
+                            span: ctor.span.into(),
+                            error: format!("Found duplicated branch {}", ctor.ident),
+                            help: Some(format!("Remove branch {}", ctor.ident)),
+                            note: None,
+                        }]);
+                    }
+                }
+
+                let needed: HashSet<&str> =
+                    sum_ty_variants.iter().map(|(name, _)| &**name).collect();
+
+                let missing = needed.difference(&hs);
+
+                let errs: Vec<_> = missing
+                    .into_iter()
+                    .map(|arm| StaticError {
+                        span: expr_span.into(),
+                        error: format!("Missing match arm: {arm}"),
+                        help: None,
+                        note: None,
+                    })
+                    .collect();
+
+                if !errs.is_empty() {
+                    return Err(errs);
+                }
+            }
 
             let mut match_arms_iter = match_arms.into_iter();
 
