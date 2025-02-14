@@ -262,6 +262,7 @@ where
                 select! {
                     Token::IdentUpper("Bool") => types::Type::Bool,
                     Token::IdentUpper("Int") => types::Type::Int,
+                    Token::IdentUpper(name) => types::Type::Sum(name.to_string().into()),
                 },
             ))
         },

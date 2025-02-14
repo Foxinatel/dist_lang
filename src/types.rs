@@ -16,7 +16,7 @@ pub enum Type {
     Mobile(Rc<Type>),
     List(Rc<Type>),
     Func(Rc<Type>, Rc<Type>),
-    Sum(Rc<String>, im::Vector<(String, Type)>),
+    Sum(Rc<String>),
 }
 
 impl std::fmt::Display for Type {
@@ -54,6 +54,13 @@ impl Default for TypeEnvironment {
         sums.insert(String::from("Option"), im::vector![
             (String::from("Some"), Type::Int),
             (String::from("None"), Type::Tuple(im::vector![])),
+        ]);
+        sums.insert(String::from("List"), im::vector![
+            (String::from("Nil"), Type::Tuple(im::vector![])),
+            (
+                String::from("Cons"),
+                Type::Tuple(im::vector![Type::Int, Type::Sum("List".to_owned().into())])
+            ),
         ]);
         Self {
             sum_types: sums,
@@ -350,7 +357,7 @@ fn type_check_impl(
                     note: None,
                 });
             }
-            if !matches!(rhs_ty, Type::Int) {
+            if rhs_ty != Type::Int {
                 errs.push(StaticError {
                     span: rhs_span.into(),
                     error: format!("Right-hand side of binary expression does not evaluate to Int. Got {rhs_ty}"),
@@ -562,10 +569,7 @@ fn type_check_impl(
             }
 
             Ok((
-                Type::Sum(
-                    Rc::new(ty_name.clone()),
-                    types.sum_types.get(ty_name).unwrap().clone(),
-                ),
+                Type::Sum(Rc::new(ty_name.clone())),
                 dynamics::Term::Tag(dynamics::Tag {
                     tag: ctor.ctor.ident.into(),
                     body: term.into(),
@@ -576,7 +580,7 @@ fn type_check_impl(
             let expr_span = expr.span;
             let (expr_ty, expr_term) = type_check_impl(*expr, types.clone())?;
 
-            let Type::Sum(sum_ty_name, sum_ty_variants) = expr_ty else {
+            let Type::Sum(sum_ty_name) = expr_ty else {
                 return Err(vec![StaticError {
                     span: expr_span.into(),
                     error: format!("Expected sum type to match on. Got {expr_ty}"),
@@ -584,6 +588,8 @@ fn type_check_impl(
                     note: None,
                 }]);
             };
+
+            let sum_ty_variants = types.sum_types.get(&*sum_ty_name).unwrap();
 
             let mut match_arms_iter = match_arms.into_iter();
 
