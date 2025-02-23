@@ -100,7 +100,7 @@ fn type_check_impl(
             let (ty, body) = type_check_impl(*term, types)?;
             Ok((
                 Type::Mobile(ty.into()),
-                dynamics::Term::Box(dynamics::Bx { body: body.into() }),
+                dynamics::Term::Box(dynamics::BxTerm { body: body.into() }),
             ))
         }
         parser::TermType::Variable(var) => {
@@ -127,7 +127,7 @@ fn type_check_impl(
 
             Ok((
                 Type::Func(func.arg_type.into(), body_ty.into()),
-                dynamics::Term::Function(dynamics::Func {
+                dynamics::Term::Function(dynamics::FuncTerm {
                     binding: func.binding.ident,
                     body: body_term.into(),
                 }),

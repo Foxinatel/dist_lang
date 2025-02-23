@@ -1,90 +1,12 @@
 use std::sync::Arc;
 
-use malachite::Integer;
+mod mobile;
+
+use mobile::MobileValueBuilder as _;
 
 use crate::dynamics::*;
 
-#[derive(Clone, Debug)]
-pub enum Value {
-    Tuple(Tuple),
-    Int(Integer),
-    Bool(bool),
-    List(List),
-    Func(Func),
-    Box(Bx),
-    Fix(Fix),
-    SumType(SumType),
-}
-
-impl Value {
-    fn int(self) -> Integer {
-        if let Self::Int(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    fn bool(self) -> bool {
-        if let Self::Bool(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    fn func(self) -> Func {
-        if let Self::Func(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    fn bx(self) -> Bx {
-        if let Self::Box(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    fn list(self) -> List {
-        if let Self::List(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    fn tuple(self) -> Tuple {
-        if let Self::Tuple(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    fn sum_type(self) -> SumType {
-        if let Self::SumType(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct List(im::Vector<(Value, Env)>);
-
-#[derive(Clone, Debug)]
-pub struct Tuple(im::Vector<(Value, Env)>);
-
-#[derive(Clone, Debug)]
-pub struct SumType {
-    pub ctor: Arc<String>,
-    pub inner: Arc<Value>,
-}
+type MobileValueBuilder = mobile::RayonMobileValueBuilder;
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -94,7 +16,7 @@ impl std::fmt::Display for Value {
                 "<{}>",
                 vals.0
                     .iter()
-                    .map(|(val, _)| format!("{val}"))
+                    .map(|val| format!("{val}"))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -108,7 +30,7 @@ impl std::fmt::Display for Value {
                 "{{{}}}",
                 vec.0
                     .iter()
-                    .map(|v| format!("{}", v.0))
+                    .map(|v| format!("{}", v))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -117,22 +39,10 @@ impl std::fmt::Display for Value {
     }
 }
 
-mod mobile;
-
-use mobile::MobileValueBuilder as _;
-type MobileValue = Arc<dyn mobile::MobileValue + 'static>;
-type MobileValueBuilder = mobile::RayonMobileValueBuilder;
-
 #[derive(Debug)]
 enum Ctrl {
     Value(Value),
     Term(Term),
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct Env {
-    global: im::HashMap<Ident, MobileValue>,
-    local: im::HashMap<Ident, (Value, Env)>,
 }
 
 impl std::fmt::Display for Env {
@@ -142,7 +52,7 @@ impl std::fmt::Display for Env {
             "{{local: [{}], global: [{}]}}",
             self.local
                 .iter()
-                .map(|v| format!("({}: {})", v.0, v.1.0))
+                .map(|v| format!("({}: {})", v.0, v.1))
                 .collect::<Vec<_>>()
                 .join(", "),
             self.global
@@ -158,13 +68,13 @@ impl std::fmt::Display for Env {
 enum Kont {
     Tuple {
         env: Env,
-        done: im::Vector<(Value, Env)>,
+        done: im::Vector<Value>,
         todo: im::Vector<Term>,
     },
     Bind(Ident, Term, Env),
     BindBox(Ident, Term, Env),
     Arg(Term, Env),
-    Func(Func, Env),
+    Func(Func),
     IfElse {
         if_true: Term,
         if_false: Term,
@@ -201,11 +111,11 @@ impl Cek {
         }
     }
 
-    fn with_global(term: Term, global: im::HashMap<Ident, MobileValue>) -> Self {
+    fn from_box(Bx { body, env }: Bx) -> Self {
         Self {
-            ctrl: Ctrl::Term(term),
+            ctrl: Ctrl::Term((*body).clone()),
             env: Env {
-                global,
+                global: env,
                 local: Default::default(),
             },
             cont: Vec::new(),
@@ -217,7 +127,7 @@ impl Cek {
             Ctrl::Value(Value::Fix(fix)) => {
                 let mut nu_env = self.env.clone();
                 let nu_fix = Value::Fix(fix.clone());
-                nu_env.local.insert(fix.binding, (nu_fix, self.env.clone()));
+                nu_env.local.insert(fix.binding, nu_fix);
                 Self {
                     ctrl: Ctrl::Term((*fix.body).clone()),
                     env: nu_env,
@@ -229,7 +139,7 @@ impl Cek {
                 match cont.pop().unwrap() {
                     // The continuation binds the control term.
                     Kont::Bind(ident, term, mut old_env) => {
-                        old_env.local.insert(ident, (val, self.env.clone()));
+                        old_env.local.insert(ident, val);
                         Self {
                             ctrl: Ctrl::Term(term),
                             env: old_env,
@@ -239,15 +149,7 @@ impl Cek {
                     Kont::BindBox(ident, term, mut old_env) => {
                         let bx = val.bx();
 
-                        // Create a mobile value from the globals of the old environment
-                        let global_only = Env {
-                            global: self.env.global.clone(),
-                            ..Env::default()
-                        };
-                        let mv = MobileValueBuilder::compute(Self::with_global(
-                            (*bx.body).clone(),
-                            global_only.global.clone(),
-                        ));
+                        let mv = MobileValueBuilder::compute(Self::from_box(bx));
 
                         // Continue on our current thread
                         old_env.global.insert(ident, mv);
@@ -258,20 +160,22 @@ impl Cek {
                         }
                     }
                     Kont::Arg(arg, orig_env) => {
-                        cont.push(Kont::Func(val.func(), self.env));
+                        cont.push(Kont::Func(val.func()));
                         Self {
                             ctrl: Ctrl::Term(arg),
                             env: orig_env,
                             cont,
                         }
                     }
-                    // We have finished evaluating a function. Push a binding to cont and start
-                    // computing the argument
-                    Kont::Func(Func { binding, body }, mut func_env) => {
-                        func_env.local.insert(binding, (val, self.env));
+                    Kont::Func(Func {
+                        binding,
+                        body,
+                        mut env,
+                    }) => {
+                        env.local.insert(binding, val);
                         Self {
                             ctrl: Ctrl::Term((*body).clone()),
-                            env: func_env,
+                            env,
                             cont,
                         }
                     }
@@ -331,7 +235,7 @@ impl Cek {
                         }
                     }
                     Kont::Push { mut list, old_env } => {
-                        list.0.push_back((val, self.env));
+                        list.0.push_back(val);
                         Self {
                             ctrl: Ctrl::Value(Value::List(list)),
                             env: old_env,
@@ -348,10 +252,10 @@ impl Cek {
                     }
                     Kont::Index(list) => {
                         let ind: usize = (&val.int()).try_into().unwrap();
-                        let (item, env) = list.0[ind].clone();
+                        let item = list.0[ind].clone();
                         Self {
                             ctrl: Ctrl::Value(item),
-                            env,
+                            env: self.env,
                             cont,
                         }
                     }
@@ -360,7 +264,7 @@ impl Cek {
                         mut done,
                         mut todo,
                     } => {
-                        done.push_back((val, self.env.clone()));
+                        done.push_back(val);
                         if let Some(nxt) = todo.pop_front() {
                             cont.push(Kont::Tuple {
                                 env: env.clone(),
@@ -382,17 +286,17 @@ impl Cek {
                     }
                     Kont::IndexTuple(ind) => {
                         let Tuple(vals) = val.tuple();
-                        let (val, env) = vals[ind as usize].clone();
+                        let val = vals[ind as usize].clone();
                         Self {
                             ctrl: Ctrl::Value(val),
-                            env,
+                            env: self.env,
                             cont,
                         }
                     }
                     Kont::Match(mut arms, mut env) => {
                         let sum = val.sum_type();
                         let Arm { bind, body } = arms.remove(&*sum.ctor).unwrap();
-                        env.local.insert(bind, ((*sum.inner).clone(), self.env));
+                        env.local.insert(bind, (*sum.inner).clone());
                         Self {
                             ctrl: Ctrl::Term(body),
                             env,
@@ -445,16 +349,25 @@ impl Cek {
                 env: Default::default(),
                 ..self
             },
-            Ctrl::Term(Term::Function(val)) => Self {
-                ctrl: Ctrl::Value(Value::Func(val)),
+            Ctrl::Term(Term::Function(FuncTerm { binding, body })) => Self {
+                ctrl: Ctrl::Value(Value::Func(Func {
+                    binding,
+                    body,
+                    env: self.env,
+                })),
+                env: Default::default(),
                 ..self
             },
-            Ctrl::Term(Term::Box(val)) => Self {
-                ctrl: Ctrl::Value(Value::Box(val)),
+            Ctrl::Term(Term::Box(BxTerm { body })) => Self {
+                ctrl: Ctrl::Value(Value::Box(Bx {
+                    body,
+                    env: self.env.global,
+                })),
+                env: Default::default(),
                 ..self
             },
             Ctrl::Term(Term::LocalVariable(ident)) => {
-                let Some((val, env)) = self.env.local.get(&ident).cloned() else {
+                let Some(val) = self.env.local.get(&ident).cloned() else {
                     panic!(
                         "Could not find local variable {ident} in scope {}",
                         self.env
@@ -462,8 +375,7 @@ impl Cek {
                 };
                 Self {
                     ctrl: Ctrl::Value(val),
-                    env,
-                    cont: self.cont,
+                    ..self
                 }
             }
             Ctrl::Term(Term::GlobalVariable(ident)) => {
@@ -473,10 +385,10 @@ impl Cek {
                         self.env
                     )
                 };
-                let (val, env) = (*mobile).clone();
+                let val = (*mobile).clone();
                 Self {
                     ctrl: Ctrl::Value(val),
-                    env,
+                    env: self.env,
                     cont: self.cont,
                 }
             }

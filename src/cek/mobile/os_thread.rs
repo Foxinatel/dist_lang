@@ -1,11 +1,11 @@
 use std::sync::{Arc, OnceLock};
 
-use crate::cek::{Cek, Env, Value};
+use crate::cek::{Cek, Value};
 
 #[derive(Clone, Debug)]
-pub struct MobileValue(Arc<OnceLock<(Value, Env)>>);
+pub struct MobileValue(Arc<OnceLock<Value>>);
 
-impl super::MobileValue for MobileValue {}
+impl super::Mobile for MobileValue {}
 
 impl super::BuildableMobileValue for MobileValue {
     fn compute(mut term: Cek) -> Self {
@@ -17,8 +17,7 @@ impl super::BuildableMobileValue for MobileValue {
                 term = term.step()
             }
             let fin = term.finish().unwrap();
-            let env = term.env;
-            v.set((fin, env)).unwrap();
+            v.set(fin).unwrap();
         });
 
         Self(val)
@@ -28,7 +27,7 @@ impl super::BuildableMobileValue for MobileValue {
 impl std::fmt::Display for MobileValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(val) = self.0.get() {
-            write!(f, "{}", val.0)
+            write!(f, "{}", val)
         } else {
             write!(f, "Uncomputed")
         }
@@ -36,7 +35,7 @@ impl std::fmt::Display for MobileValue {
 }
 
 impl std::ops::Deref for MobileValue {
-    type Target = (Value, Env);
+    type Target = Value;
 
     fn deref(&self) -> &Self::Target {
         if let Some(v) = self.0.get() {
