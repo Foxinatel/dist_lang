@@ -24,15 +24,14 @@ impl std::fmt::Display for Type {
         match self {
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
-            Type::Tuple(inner) => {let join =inner
+            Type::Tuple(inner) => {
+                let join = inner
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
-                    .join(", ") ; write!(
-                f,
-                "<{join}>",
-                
-            )},
+                    .join(", ");
+                write!(f, "<{join}>",)
+            }
             Type::Mobile(inner) => write!(f, "[{inner}]"),
             Type::List(inner) => write!(f, "{{{inner}}}"),
             Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),

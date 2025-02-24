@@ -1,5 +1,7 @@
 #![feature(once_wait)]
 #![feature(exitcode_exit_method)]
+#![feature(fn_traits)]
+#![feature(unboxed_closures)]
 
 use ariadne::*;
 

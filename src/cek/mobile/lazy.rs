@@ -2,21 +2,28 @@ use std::{ops::Deref, sync::LazyLock};
 
 use crate::cek::Value;
 
+struct EvalCek(crate::cek::Cek);
+
+impl FnOnce<()> for EvalCek {
+    type Output = Value;
+
+    extern "rust-call" fn call_once(self, _: ()) -> Self::Output {
+        let mut cek = self.0;
+        while cek.finish().is_none() {
+            cek = cek.step();
+        }
+        cek.finish().unwrap()
+    }
+}
+
 #[derive(Debug)]
-pub struct MobileValue(LazyLock<Value, Box<dyn FnOnce() -> Value + Send>>);
+pub struct MobileValue(LazyLock<Value, EvalCek>);
 
 impl super::Mobile for MobileValue {}
 
 impl super::BuildableMobileValue for MobileValue {
-    fn compute(mut cek: crate::cek::Cek) -> Self {
-        let f = move || {
-            while cek.finish().is_none() {
-                cek = cek.step();
-            }
-            cek.finish().unwrap()
-        };
-
-        Self(LazyLock::new(Box::new(f)))
+    fn compute(cek: crate::cek::Cek) -> Self {
+        Self(LazyLock::new(EvalCek(cek)))
     }
 }
 
