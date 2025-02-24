@@ -1,5 +1,6 @@
 use crate::dynamics::Mobile;
 
+mod lazy;
 mod os_thread;
 mod rayon;
 mod serial;
@@ -19,6 +20,9 @@ impl MobileValueBuilder<rayon::MobileValue> for RayonMobileValueBuilder {}
 
 pub struct SerialMobileValueBuilder;
 impl MobileValueBuilder<serial::MobileValue> for SerialMobileValueBuilder {}
+
+pub struct LazyMobileValueBuilder;
+impl MobileValueBuilder<lazy::MobileValue> for LazyMobileValueBuilder {}
 
 pub struct OsThreadMobileValueBuilder;
 impl MobileValueBuilder<os_thread::MobileValue> for OsThreadMobileValueBuilder {}
