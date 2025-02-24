@@ -473,11 +473,7 @@ pub fn generate_static_ast(input: &str) -> Result<Term, Vec<StaticError>> {
     if !lex_errs.is_empty() {
         return Err(lex_errs
             .into_iter()
-            .map(|(err, span)| StaticError {
-                span: span.clone(),
-                error: format!("Lexer error: {}", err.unwrap_err()),
-                ..Default::default()
-            })
+            .map(|(err, span)| StaticError::new(span, format!("Lexer error: {}", err.unwrap_err())))
             .collect());
     }
 
@@ -492,12 +488,7 @@ pub fn generate_static_ast(input: &str) -> Result<Term, Vec<StaticError>> {
     if !errs.is_empty() {
         return Err(errs
             .into_iter()
-            .map(|err| StaticError {
-                span: (*err.span()).into(),
-                error: format!("{err:?}"),
-                help: None,
-                note: None,
-            })
+            .map(|err| StaticError::new(*err.span(), format!("{err:?}")))
             .collect());
     }
 

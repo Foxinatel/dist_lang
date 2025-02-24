@@ -24,19 +24,111 @@ impl std::fmt::Display for Type {
         match self {
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
-            Type::Tuple(inner) => write!(
-                f,
-                "<{}>",
-                inner
+            Type::Tuple(inner) => {let join =inner
                     .iter()
-                    .map(|ty| format!("{ty}"))
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+                    .join(", ") ; write!(
+                f,
+                "<{join}>",
+                
+            )},
             Type::Mobile(inner) => write!(f, "[{inner}]"),
             Type::List(inner) => write!(f, "{{{inner}}}"),
             Type::Func(arg, ret) => write!(f, "({arg} -> {ret})"),
             Type::Sum(name) => write!(f, "{name}"),
+        }
+    }
+}
+
+enum TypeError {
+    MissingVariable {
+        ident: String,
+    },
+    InvalidCtor {
+        ident: String,
+    },
+    TypeMismatch {
+        expected: Type,
+        got: Type,
+    },
+    NotAFunction {
+        got: Type,
+    },
+    NotABox {
+        got: Type,
+    },
+    NotAnArray {
+        got: Type,
+    },
+    NotATuple {
+        got: Type,
+    },
+    NotASumType {
+        got: Type,
+    },
+    InvalidTupleIndex {
+        index: u64,
+        len: usize,
+    },
+    DuplicatedBranch {
+        ident: String,
+    },
+    MissingBranch {
+        ident: String,
+    },
+    CtorDoesNotBelongToType {
+        ctor_ident: String,
+        ty_ident: String,
+    },
+}
+
+impl std::fmt::Display for TypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeError::MissingVariable { ident } => {
+                write!(f, "Variable {ident} not in any context at this point.")
+            }
+            TypeError::InvalidCtor { ident } => {
+                write!(f, "Constructor {ident} does not exist on any type.")
+            }
+            TypeError::TypeMismatch { expected, got } => {
+                write!(f, "Type Mismatch: Expected {expected}. Got {got}.")
+            }
+            TypeError::NotAFunction { got } => {
+                write!(f, "Type Mismatch: Expected a function. Got {got}.")
+            }
+            TypeError::NotABox { got } => {
+                write!(f, "Type Mismatch: Expected a box. Got {got}.")
+            }
+            TypeError::NotAnArray { got } => {
+                write!(f, "Type Mismatch: Expected an array. Got {got}.")
+            }
+            TypeError::NotATuple { got } => {
+                write!(f, "Type Mismatch: Expected a tuple. Got {got}.")
+            }
+            TypeError::NotASumType { got } => {
+                write!(f, "Type Mismatch: Expected a sum type. Got {got}.")
+            }
+            TypeError::InvalidTupleIndex { index, len } => {
+                write!(
+                    f,
+                    "Tried to index a tuple at position {index}. Tuple length is {len}."
+                )
+            }
+            TypeError::DuplicatedBranch { ident } => {
+                write!(f, "Match statement contains duplicate arms for {ident}.")
+            }
+            TypeError::MissingBranch { ident } => {
+                write!(f, "Match statement is missing arm for {ident}.")
+            }
+            TypeError::CtorDoesNotBelongToType {
+                ctor_ident,
+                ty_ident,
+            } => write!(
+                f,
+                "Constructor {ctor_ident} does not exist on type {ty_ident}."
+            ),
         }
     }
 }
@@ -109,12 +201,8 @@ fn type_check_impl(
             } else if let Some((ty, _)) = types.global.get(&var.ident) {
                 Ok((ty.clone(), dynamics::Term::GlobalVariable(var.ident)))
             } else {
-                Err(vec![StaticError {
-                    span: term.span.into(),
-                    error: format!("Could not find variable {} in context", var.ident),
-                    help: None,
-                    note: None,
-                }])
+                let err = TypeError::MissingVariable { ident: var.ident };
+                StaticError::new(term.span, err).into()
             }
         }
         parser::TermType::Function(func) => {
@@ -139,25 +227,17 @@ fn type_check_impl(
             let (arg_ty, arg_term) = type_check_impl(*app.arg, types.clone())?;
 
             let Type::Func(farg_ty, ret_ty) = func_ty else {
-                return Err(vec![StaticError {
-                    span: func_span.into(),
-                    error: format!(
-                        "Left side of application not evaluate to a function type. Got {func_ty}"
-                    ),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::NotAFunction { got: func_ty };
+                return StaticError::new(func_span, err).into();
             };
+            let farg_ty = (*farg_ty).clone();
 
-            if arg_ty != *farg_ty {
-                return Err(vec![StaticError {
-                    span: arg_span.into(),
-                    error: format!(
-                        "Right side of application did not match function type. Expected {farg_ty}. Got {arg_ty}"
-                    ),
-                    help: None,
-                    note: None,
-                }]);
+            if arg_ty != farg_ty {
+                let err = TypeError::TypeMismatch {
+                    expected: farg_ty,
+                    got: arg_ty,
+                };
+                return StaticError::new(arg_span, err).into();
             }
 
             Ok((
@@ -169,37 +249,24 @@ fn type_check_impl(
             ))
         }
         parser::TermType::IfElse(if_else) => {
-            let c_span = if_else.cond.span;
-            let (t_span, f_span) = (if_else.if_true.span, if_else.if_false.span);
+            let (c_span, f_span) = (if_else.cond.span, if_else.if_false.span);
             let (cond_ty, cond_term) = type_check_impl(*if_else.cond, types.clone())?;
             let (true_ty, true_term) = type_check_impl(*if_else.if_true, types.clone())?;
             let (false_ty, false_term) = type_check_impl(*if_else.if_false, types.clone())?;
 
-            let mut errs = vec![];
             if !matches!(cond_ty, Type::Bool) {
-                errs.push(StaticError {
-                    span: c_span.into(),
-                    error: format!("Condition did not evaluate to a Bool. Got {cond_ty}"),
-                    help: None,
-                    note: None,
-                });
+                let err = TypeError::TypeMismatch {
+                    expected: Type::Bool,
+                    got: cond_ty,
+                };
+                return StaticError::new(c_span, err).into();
             }
             if true_ty != false_ty {
-                errs.push(StaticError {
-                    span: t_span.into(),
-                    error: format!("True case: {true_ty}"),
-                    help: None,
-                    note: None,
-                });
-                errs.push(StaticError {
-                    span: f_span.into(),
-                    error: format!("Branches do not match. False case is {false_ty}"),
-                    help: None,
-                    note: None,
-                });
-            }
-            if !errs.is_empty() {
-                return Err(errs);
+                let err = TypeError::TypeMismatch {
+                    expected: true_ty,
+                    got: false_ty,
+                };
+                return StaticError::new(f_span, err).into();
             }
 
             Ok((
@@ -214,18 +281,11 @@ fn type_check_impl(
         parser::TermType::LetBinding(let_binding) => {
             if let Some((_, prev_span)) = types.global.get(&let_binding.binding.ident) {
                 return Err(vec![
-                    StaticError {
-                        span: let_binding.binding.span.into(),
-                        error: String::from("Conflicting variable binding"),
-                        help: None,
-                        note: None,
-                    },
-                    StaticError {
-                        span: (*prev_span).into(),
-                        error: String::from("Previously defined here"),
-                        help: None,
-                        note: None,
-                    },
+                    StaticError::new(
+                        let_binding.binding.span,
+                        String::from("Conflicting variable binding"),
+                    ),
+                    StaticError::new(*prev_span, String::from("Previously defined here")),
                 ]);
             }
 
@@ -248,30 +308,19 @@ fn type_check_impl(
         parser::TermType::LetBoxBinding(let_binding) => {
             if let Some((_, prev_span)) = types.local.get(&let_binding.binding.ident) {
                 return Err(vec![
-                    StaticError {
-                        span: let_binding.binding.span.into(),
-                        error: String::from("Conflicting variable binding"),
-                        help: None,
-                        note: None,
-                    },
-                    StaticError {
-                        span: (*prev_span).into(),
-                        error: String::from("Previously defined here"),
-                        help: None,
-                        note: None,
-                    },
+                    StaticError::new(
+                        let_binding.binding.span,
+                        String::from("Conflicting variable binding"),
+                    ),
+                    StaticError::new(*prev_span, String::from("Previously defined here")),
                 ]);
             }
 
             let ev_span = let_binding.expr.span;
             let (ev_ty, ev_term) = type_check_impl(*let_binding.expr, types.clone())?;
             let Type::Mobile(ev_ty) = ev_ty else {
-                return Err(vec![StaticError {
-                    span: ev_span.into(),
-                    error: format!("LetBox binding did not evaluate to a box type. Got {ev_ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::NotABox { got: ev_ty };
+                return StaticError::new(ev_span, err).into();
             };
 
             let mut new_types = types.clone();
@@ -300,24 +349,16 @@ fn type_check_impl(
             let (body_ty, body_term) = type_check_impl(*fix.body, new_types)?;
 
             if !matches!(fix.arg_type, Type::Func(..)) {
-                return Err(vec![StaticError {
-                    span: term.span.into(),
-                    error: "Fix is not supported for non-functions types".to_string(),
-                    help: None,
-                    note: None,
-                }]);
+                let msg = String::from("Fix is not supported for non-functions types");
+                return StaticError::new(term.span, msg).into();
             }
 
             if body_ty != fix.arg_type {
-                return Err(vec![StaticError {
-                    span: body_span.into(),
-                    error: format!(
-                        "Fix body does not match type signature. Expected {}. Got {}",
-                        fix.arg_type, body_ty
-                    ),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::TypeMismatch {
+                    expected: fix.arg_type,
+                    got: body_ty,
+                };
+                return StaticError::new(body_span, err).into();
             }
 
             Ok((
@@ -335,35 +376,27 @@ fn type_check_impl(
 
             let mut errs = vec![];
             if !matches!(lhs_ty, Type::Int) {
-                errs.push(StaticError {
-                    span: lhs_span.into(),
-                    error: format!(
-                        "Left-hand side of binary expression does not evaluate to Int. Got {lhs_ty}"
-                    ),
-                    help: None,
-                    note: None,
-                });
+                let err = TypeError::TypeMismatch {
+                    expected: Type::Int,
+                    got: lhs_ty.clone(),
+                };
+                errs.push(StaticError::new(lhs_span, err));
             }
             if !matches!(lhs_ty, Type::Int)
                 && matches!(rhs_ty, Type::Int)
                 && matches!(bin.op, BinaryOp::Subtract)
             {
-                errs.push(StaticError {
-                    span: (lhs_span.end..rhs_span.end),
-                    error: String::from(
-                        "If you intended to perform application with a negated argument, wrap this argument in brackets",
-                    ),
-                    help: None,
-                    note: None,
-                });
+                let msg = String::from(
+                    "If you intended to perform application with a negated argument, wrap this argument in brackets",
+                );
+                errs.push(StaticError::new(lhs_span.end..rhs_span.end, msg));
             }
             if rhs_ty != Type::Int {
-                errs.push(StaticError {
-                    span: rhs_span.into(),
-                    error: format!("Right-hand side of binary expression does not evaluate to Int. Got {rhs_ty}"),
-                    help: None,
-                    note: None,
-                });
+                let err = TypeError::TypeMismatch {
+                    expected: Type::Int,
+                    got: rhs_ty.clone(),
+                };
+                errs.push(StaticError::new(rhs_span, err));
             }
 
             if !errs.is_empty() {
@@ -412,12 +445,11 @@ fn type_check_impl(
             let inner_span = term.span;
             let (inner_ty, inner_term) = type_check_impl(*term, types)?;
             if !matches!(inner_ty, Type::Int) {
-                return Err(vec![StaticError {
-                    span: inner_span.into(),
-                    error: format!("Unary minus can only be applied to Int. Got {inner_ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::TypeMismatch {
+                    expected: Type::Int,
+                    got: inner_ty,
+                };
+                return StaticError::new(inner_span, err).into();
             }
             Ok((
                 Type::Int,
@@ -430,23 +462,16 @@ fn type_check_impl(
             let (item_ty, item_term) = type_check_impl(*item, types.clone())?;
 
             let Type::List(list_ty_inner) = list_ty.clone() else {
-                return Err(vec![StaticError {
-                    span: list_span.into(),
-                    error: format!("Left side of append was not a list type. Got {list_ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::NotAnArray { got: list_ty };
+                return StaticError::new(list_span, err).into();
             };
 
             if *list_ty_inner != item_ty {
-                return Err(vec![StaticError {
-                    span: item_span.into(),
-                    error: format!(
-                        "Right side of append does not match left side. Expected {list_ty_inner}. Got {item_ty}"
-                    ),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::TypeMismatch {
+                    expected: (*list_ty_inner).clone(),
+                    got: item_ty,
+                };
+                return StaticError::new(item_span, err).into();
             }
 
             Ok((
@@ -463,21 +488,16 @@ fn type_check_impl(
             let (index_ty, index_term) = type_check_impl(*index, types.clone())?;
 
             let Type::List(list_ty_inner) = list_ty.clone() else {
-                return Err(vec![StaticError {
-                    span: list_span.into(),
-                    error: format!("Left side of index was not a list type. Got {list_ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::NotAnArray { got: list_ty };
+                return StaticError::new(list_span, err).into();
             };
 
             if !matches!(index_ty, Type::Int) {
-                return Err(vec![StaticError {
-                    span: index_span.into(),
-                    error: format!("Right side of index was not an Int. Got {index_ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::TypeMismatch {
+                    expected: Type::Int,
+                    got: index_ty,
+                };
+                return StaticError::new(index_span, err).into();
             }
 
             Ok((
@@ -493,28 +513,19 @@ fn type_check_impl(
             let (ty, term) = type_check_impl(*tuple_index.tup, types)?;
             let ind: Result<u64, _> = (&tuple_index.index.0).try_into();
             let Ok(ind) = ind else {
-                return Err(vec![StaticError {
-                    span: tuple_index.index.1.into(),
-                    error: String::from("Index too large"),
-                    help: None,
-                    note: None,
-                }]);
+                return StaticError::new(tuple_index.index.1, String::from("Index too large"))
+                    .into();
             };
             let Type::Tuple(typs) = ty else {
-                return Err(vec![StaticError {
-                    span: span.into(),
-                    error: format!("Expected tuple on left side of expression. Got {ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::NotATuple { got: ty };
+                return StaticError::new(span, err).into();
             };
             if ind as usize >= typs.len() {
-                return Err(vec![StaticError {
-                    span: tuple_index.index.1.into(),
-                    error: format!("Invalid index {ind}, length of tuple was {}", typs.len()),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::InvalidTupleIndex {
+                    index: ind,
+                    len: typs.len(),
+                };
+                return StaticError::new(tuple_index.index.1, err).into();
             }
             Ok((
                 typs[ind as usize].clone(),
@@ -528,12 +539,11 @@ fn type_check_impl(
             let span = term.span;
             let (ty, inner) = type_check_impl(*term, types)?;
             if ty != asc {
-                return Err(vec![StaticError {
-                    span: span.into(),
-                    error: format!("Term does not match ascription. Expected {asc} Got {ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::TypeMismatch {
+                    expected: asc,
+                    got: ty,
+                };
+                return StaticError::new(span, err).into();
             }
             Ok((ty, inner))
         }
@@ -545,27 +555,22 @@ fn type_check_impl(
                     })
                 })
             else {
-                return Err(vec![StaticError {
-                    span: ctor.ctor.span.into(),
-                    error: format!(
-                        "Invalid ctor: {} does not belong to any known type",
-                        ctor.ctor.ident
-                    ),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::InvalidCtor {
+                    ident: ctor.ctor.ident,
+                };
+                return StaticError::new(ctor.ctor.span, err).into();
             };
+            let inner_variant_type = (*inner_variant_type).clone();
 
-            let span = ctor.term.span.into();
+            let span = ctor.term.span;
             let (ty, term) = type_check_impl(*ctor.term, types.clone())?;
 
-            if ty != *inner_variant_type {
-                return Err(vec![StaticError {
-                    span,
-                    error: format!("Expected type {inner_variant_type}, Got {ty}"),
-                    help: None,
-                    note: None,
-                }]);
+            if ty != inner_variant_type {
+                let err = TypeError::TypeMismatch {
+                    expected: inner_variant_type,
+                    got: ty,
+                };
+                return StaticError::new(span, err).into();
             }
 
             Ok((
@@ -581,12 +586,8 @@ fn type_check_impl(
             let (expr_ty, expr_term) = type_check_impl(*expr, types.clone())?;
 
             let Type::Sum(sum_ty_name) = expr_ty else {
-                return Err(vec![StaticError {
-                    span: expr_span.into(),
-                    error: format!("Expected sum type to match on. Got {expr_ty}"),
-                    help: None,
-                    note: None,
-                }]);
+                let err = TypeError::NotASumType { got: expr_ty };
+                return StaticError::new(expr_span, err).into();
             };
 
             let sum_ty_variants = types.sum_types.get(&*sum_ty_name).unwrap();
@@ -595,12 +596,11 @@ fn type_check_impl(
                 let mut hs: HashSet<&str> = HashSet::new();
                 for MatchArm { ctor, .. } in &match_arms {
                     if !hs.insert(&ctor.ident) {
-                        return Err(vec![StaticError {
-                            span: ctor.span.into(),
-                            error: format!("Found duplicated branch {}", ctor.ident),
-                            help: Some(format!("Remove branch {}", ctor.ident)),
-                            note: None,
-                        }]);
+                        let err = TypeError::DuplicatedBranch {
+                            ident: ctor.ident.clone(),
+                        };
+                        let help = format!("Remove branch {}", ctor.ident);
+                        return StaticError::new(ctor.span, err).with_help(help).into();
                     }
                 }
 
@@ -611,11 +611,11 @@ fn type_check_impl(
 
                 let errs: Vec<_> = missing
                     .into_iter()
-                    .map(|arm| StaticError {
-                        span: expr_span.into(),
-                        error: format!("Missing match arm: {arm}"),
-                        help: None,
-                        note: None,
+                    .map(|arm| {
+                        let err = TypeError::MissingBranch {
+                            ident: arm.to_string(),
+                        };
+                        StaticError::new(expr_span, err)
                     })
                     .collect();
 
@@ -633,15 +633,11 @@ fn type_check_impl(
                     .iter()
                     .find_map(|(nm, ty)| (*nm == arm.ctor.ident).then_some(ty))
                 else {
-                    return Err(vec![StaticError {
-                        span: arm.ctor.span.into(),
-                        error: format!(
-                            "Ctor {} is not valid on type {sum_ty_name}",
-                            arm.ctor.ident
-                        ),
-                        help: None,
-                        note: None,
-                    }]);
+                    let err = TypeError::CtorDoesNotBelongToType {
+                        ctor_ident: arm.ctor.ident,
+                        ty_ident: sum_ty_name.to_string(),
+                    };
+                    return StaticError::new(arm.ctor.span, err).into();
                 };
 
                 let mut types = types.clone();
@@ -666,15 +662,11 @@ fn type_check_impl(
                         .iter()
                         .find_map(|(nm, ty)| (*nm == arm.ctor.ident).then_some(ty))
                     else {
-                        return Err(vec![StaticError {
-                            span: arm.ctor.span.into(),
-                            error: format!(
-                                "Ctor {} is not valid on type {sum_ty_name}",
-                                arm.ctor.ident
-                            ),
-                            help: None,
-                            note: None,
-                        }]);
+                        let err = TypeError::CtorDoesNotBelongToType {
+                            ctor_ident: arm.ctor.ident,
+                            ty_ident: sum_ty_name.to_string(),
+                        };
+                        return Err(vec![StaticError::new(arm.ctor.span, err)]);
                     };
 
                     let body_span = arm.body.span;
@@ -685,14 +677,11 @@ fn type_check_impl(
                     let (ty, term) = type_check_impl(arm.body, types)?;
 
                     if ty != fst_ty {
-                        return Err(vec![StaticError {
-                            span: body_span.into(),
-                            error: format!(
-                                "Match arms have inconsistent types. Expected {fst_ty}. Got {ty}"
-                            ),
-                            help: None,
-                            note: None,
-                        }]);
+                        let err = TypeError::TypeMismatch {
+                            expected: fst_ty.clone(),
+                            got: ty,
+                        };
+                        return StaticError::new(body_span, err).into();
                     }
 
                     Ok((arm.ctor.ident, dynamics::Arm {

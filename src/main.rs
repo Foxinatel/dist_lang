@@ -19,6 +19,35 @@ pub struct StaticError {
     pub note: Option<String>,
 }
 
+impl StaticError {
+    fn new(span: impl Into<std::ops::Range<usize>>, error: impl ToString) -> Self {
+        Self {
+            span: span.into(),
+            error: error.to_string(),
+            help: None,
+            note: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn with_help(mut self, msg: String) -> Self {
+        self.help = Some(msg);
+        self
+    }
+
+    #[allow(dead_code)]
+    fn with_note(mut self, msg: String) -> Self {
+        self.note = Some(msg);
+        self
+    }
+}
+
+impl<T, I: FromIterator<StaticError>> From<StaticError> for Result<T, I> {
+    fn from(value: StaticError) -> Self {
+        Err(I::from_iter(std::iter::once(value)))
+    }
+}
+
 fn unwrap_static<T>(result: Result<T, Vec<StaticError>>, file: &str, src: &str) -> T {
     result.unwrap_or_else(|errs| {
         let mut colours = ColorGenerator::default();
