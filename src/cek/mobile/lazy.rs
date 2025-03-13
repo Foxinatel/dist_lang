@@ -1,35 +1,56 @@
-use std::{ops::Deref, sync::LazyLock};
+use std::{
+    ops::Deref,
+    sync::{Arc, LazyLock, OnceLock},
+};
 
 use crate::cek::Value;
 
-struct EvalCek(crate::cek::Cek);
+enum MaybeEvalCek {
+    NeedsEval(crate::cek::Cek),
+    JustValue(Value),
+}
 
-impl FnOnce<()> for EvalCek {
+impl FnOnce<()> for MaybeEvalCek {
     type Output = Value;
 
     extern "rust-call" fn call_once(self, _: ()) -> Self::Output {
-        let mut cek = self.0;
-        while cek.finish().is_none() {
-            cek = cek.step();
+        match self {
+            MaybeEvalCek::NeedsEval(mut cek) => {
+                while cek.finish().is_none() {
+                    cek = cek.step();
+                }
+                cek.finish().unwrap()
+            }
+            MaybeEvalCek::JustValue(value) => value,
         }
-        cek.finish().unwrap()
     }
 }
 
-#[derive(Debug)]
-pub struct MobileValue(LazyLock<Value, EvalCek>);
+#[derive(Debug, Clone)]
+pub struct MobileValue(Arc<OnceLock<LazyLock<Value, MaybeEvalCek>>>);
 
 impl super::Mobile for MobileValue {}
 
 impl super::BuildableMobileValue for MobileValue {
     fn compute(cek: crate::cek::Cek) -> Self {
-        Self(LazyLock::new(EvalCek(cek)))
+        Self(Arc::new(OnceLock::from(LazyLock::new(
+            MaybeEvalCek::NeedsEval(cek),
+        ))))
+    }
+
+    fn with_value(val: impl FnOnce(Self) -> Value) -> Self {
+        let mobile = Self(Arc::new(OnceLock::new()));
+        mobile
+            .0
+            .set(LazyLock::new(MaybeEvalCek::JustValue(val(mobile.clone()))))
+            .unwrap();
+        mobile
     }
 }
 
 impl std::fmt::Display for MobileValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", *self.0)
+        todo!()
     }
 }
 
@@ -37,6 +58,6 @@ impl Deref for MobileValue {
     type Target = Value;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        self.0.get().unwrap()
     }
 }

@@ -1,34 +1,28 @@
-let reverse = fix |f: {Int} -> {Int}|(
-    |arr: {Int}| (
-        if |arr| == 0 then Int{} else (f (arr[1..])) :: arr[0]
-    )
+let reverse = fix f |arr: {Int}|: {Int} (
+    if |arr| == 0 then Int{} else (f (arr[1..])) :: arr[0]
 )
 in
-let combine = fix |f: <{Int}, {Int}> -> {Int}| (
-    |input: <{Int}, {Int}>| (
-        let lhs = input.0 in
-        let rhs = input.1 in
-        if |lhs| == 0 then
-            reverse (rhs)
-        else if |rhs| == 0 then
-            reverse (lhs)
-        else if rhs[0] < lhs[0] then
-            (f (<lhs, rhs[1..]>)) :: rhs[0]
-        else
-            (f (<lhs[1..], rhs>)) :: lhs[0]
-    )
+let combine = fix f |input: <{Int}, {Int}>|: {Int} (
+    let lhs = input.0 in
+    let rhs = input.1 in
+    if |lhs| == 0 then
+        reverse (rhs)
+    else if |rhs| == 0 then
+        reverse (lhs)
+    else if rhs[0] < lhs[0] then
+        (f (<lhs, rhs[1..]>)) :: rhs[0]
+    else
+        (f (<lhs[1..], rhs>)) :: lhs[0]
 )
 in
-let merge_sort = fix |f: {Int} -> {Int}| (
-    |input: {Int}| (
-        let midpoint = |input|/2 in
-        if midpoint == 0 then
-            input
-        else
-            let lhs = f (input[..midpoint]) in
-            let rhs = f (input[midpoint..]) in
-            reverse (combine (<lhs, rhs>))
-    )
+let merge_sort = fix f |input: {Int}|: {Int} (
+    let midpoint = |input|/2 in
+    if midpoint == 0 then
+        input
+    else
+        let lhs = f (input[..midpoint]) in
+        let rhs = f (input[midpoint..]) in
+        reverse (combine (<lhs, rhs>))
 )
 in
-merge_sort ((((((((Int{} :: 7) :: 8) :: 1) :: 23) :: 5) :: 8 ) :: 2) :: 4)
+merge_sort ((((((((Int{} :: 7) :: 8) :: 1) :: 23) :: 5) :: 8 ) :: 2):: 4)

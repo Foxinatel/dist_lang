@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 mod mobile;
-
 use mobile::MobileValueBuilder as _;
 
 use crate::dynamics::*;
 
-type MobileValueBuilder = mobile::RayonMobileValueBuilder;
+type MobileValueBuilder = mobile::OsThreadMobileValueBuilder;
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -22,9 +21,8 @@ impl std::fmt::Display for Value {
             ),
             Value::Int(val) => write!(f, "{val:?}"),
             Value::Bool(val) => write!(f, "{val:?}"),
-            Value::Func(func) => write!(f, "{} -> (...)", func.binding),
             Value::Box(_) => write!(f, "box (...)"),
-            Value::Fix(fix) => write!(f, "fix {} -> (...)", fix.binding),
+            Value::Fix(fix) => write!(f, "fix {} -> (...)", "TODO"),
             Value::List(vec) => write!(
                 f,
                 "{{{}}}",
@@ -35,6 +33,7 @@ impl std::fmt::Display for Value {
                     .join(", ")
             ),
             Value::SumType(sum) => write!(f, "{} {:?}", sum.ctor, sum.inner),
+            Value::MFix(fix) => write!(f, "mfix {} -> (...)", "TODO"),
         }
     }
 }
@@ -71,10 +70,15 @@ enum Kont {
         done: im::Vector<Value>,
         todo: im::Vector<Term>,
     },
+    Arr {
+        env: Env,
+        done: im::Vector<Value>,
+        todo: im::Vector<Term>,
+    },
     Bind(Ident, Term, Env),
     BindBox(Ident, Term, Env),
     Arg(Term, Env),
-    Func(Func),
+    Func(Fix),
     IfElse {
         if_true: Term,
         if_false: Term,
@@ -137,17 +141,6 @@ impl Cek {
     pub fn step(self) -> Self {
         let mut cont = self.cont;
         match self.ctrl {
-            // Dynamic: Fix-Step
-            Ctrl::Value(Value::Fix(fix)) => {
-                let mut nu_env = fix.env.clone();
-                let nu_fix = Value::Fix(fix.clone());
-                nu_env.local.insert(fix.binding, nu_fix);
-                Self {
-                    ctrl: Ctrl::Term((*fix.body).clone()),
-                    env: nu_env,
-                    cont,
-                }
-            }
             Ctrl::Value(val) => {
                 match cont.pop().unwrap() {
                     // Dynamic: Bind
@@ -160,22 +153,46 @@ impl Cek {
                         }
                     }
                     // Dynamic: BindBox
-                    Kont::BindBox(ident, term, mut old_env) => {
-                        let bx = val.bx();
+                    Kont::BindBox(ident, term, mut env) => {
+                        match val {
+                            Value::Box(bx) => {
+                                let mv = MobileValueBuilder::compute(Self::from_box(bx));
 
-                        let mv = MobileValueBuilder::compute(Self::from_box(bx));
-
-                        // Continue on our current thread
-                        old_env.global.insert(ident, mv);
-                        Self {
-                            ctrl: Ctrl::Term(term),
-                            env: old_env,
-                            cont,
+                                // Continue on our current thread
+                                env.global.insert(ident, mv);
+                                Self {
+                                    ctrl: Ctrl::Term(term),
+                                    env,
+                                    cont,
+                                }
+                            }
+                            Value::MFix(fix) => {
+                                let func = MobileValueBuilder::with_value(|this| {
+                                    let mut env = fix.env;
+                                    env.insert(fix.fix_binding, Arc::new(this));
+                                    Value::Fix(Fix {
+                                        fix_binding: "".into(),
+                                        inner_binding: fix.inner_binding,
+                                        body: fix.body,
+                                        env: Env {
+                                            global: env,
+                                            ..Default::default()
+                                        },
+                                    })
+                                });
+                                env.global.insert(ident, func);
+                                Self {
+                                    ctrl: Ctrl::Term(term),
+                                    env,
+                                    cont,
+                                }
+                            }
+                            v => todo!("Tried to bindbox with {}", v),
                         }
                     }
                     // Dynamic: App-2
                     Kont::Arg(arg, orig_env) => {
-                        cont.push(Kont::Func(val.func()));
+                        cont.push(Kont::Func(val.fix()));
                         Self {
                             ctrl: Ctrl::Term(arg),
                             env: orig_env,
@@ -183,12 +200,15 @@ impl Cek {
                         }
                     }
                     // Dynamic: App
-                    Kont::Func(Func {
-                        binding,
-                        body,
-                        mut env,
-                    }) => {
-                        env.local.insert(binding, val);
+                    Kont::Func(fx) => {
+                        let Fix {
+                            fix_binding,
+                            inner_binding,
+                            body,
+                            mut env,
+                        } = fx.clone();
+                        env.local.insert(fix_binding, Value::Fix(fx));
+                        env.local.insert(inner_binding, val);
                         Self {
                             ctrl: Ctrl::Term((*body).clone()),
                             env,
@@ -302,6 +322,33 @@ impl Cek {
                             // Dynamic: Tup
                             Self {
                                 ctrl: Ctrl::Value(Value::Tuple(Tuple(done))),
+                                env: Default::default(),
+                                cont,
+                            }
+                        }
+                    }
+                    Kont::Arr {
+                        env,
+                        mut done,
+                        mut todo,
+                    } => {
+                        done.push_back(val);
+                        if let Some(nxt) = todo.pop_front() {
+                            // Dynamic: Arr-2
+                            cont.push(Kont::Arr {
+                                env: env.clone(),
+                                done,
+                                todo,
+                            });
+                            Self {
+                                ctrl: Ctrl::Term(nxt),
+                                env,
+                                cont,
+                            }
+                        } else {
+                            // Dynamic: Arr
+                            Self {
+                                ctrl: Ctrl::Value(Value::List(List(done))),
                                 env: Default::default(),
                                 cont,
                             }
@@ -427,12 +474,28 @@ impl Cek {
                     }
                 }
             }
-            // Dynamic: Nil
-            Ctrl::Term(Term::NilLiteral) => Self {
-                ctrl: Ctrl::Value(Value::List(Default::default())),
-                env: Default::default(),
-                cont,
-            },
+            Ctrl::Term(Term::ArrLiteral(mut terms)) => {
+                if let Some(fst) = terms.pop_front() {
+                    // Dynamic: Arr-1
+                    cont.push(Kont::Arr {
+                        env: self.env.clone(),
+                        done: Default::default(),
+                        todo: terms,
+                    });
+                    Self {
+                        ctrl: Ctrl::Term(fst),
+                        env: self.env,
+                        cont,
+                    }
+                } else {
+                    // Dynamic: Nil
+                    Self {
+                        ctrl: Ctrl::Value(Value::List(Default::default())),
+                        env: Default::default(),
+                        cont,
+                    }
+                }
+            }
             // Dynamic: IntLiteral
             Ctrl::Term(Term::IntLiteral(val)) => Self {
                 ctrl: Ctrl::Value(Value::Int(val.into())),
@@ -456,8 +519,9 @@ impl Cek {
             },
             // Dynamic: Func
             Ctrl::Term(Term::Function(FuncTerm { binding, body })) => Self {
-                ctrl: Ctrl::Value(Value::Func(Func {
-                    binding,
+                ctrl: Ctrl::Value(Value::Fix(Fix {
+                    fix_binding: "".into(),
+                    inner_binding: binding,
                     body,
                     env: self.env,
                 })),
@@ -465,11 +529,31 @@ impl Cek {
                 cont,
             },
             // Dynamic: Fix
-            Ctrl::Term(Term::Fix(FuncTerm { binding, body })) => Self {
-                ctrl: Ctrl::Value(Value::Fix(Func {
-                    binding,
+            Ctrl::Term(Term::Fix(FixTerm {
+                fix_binding,
+                inner_binding,
+                body,
+            })) => Self {
+                ctrl: Ctrl::Value(Value::Fix(Fix {
+                    fix_binding,
+                    inner_binding,
                     body,
                     env: self.env,
+                })),
+                env: Default::default(),
+                cont,
+            },
+            // Dynamic: Fix
+            Ctrl::Term(Term::MFix(FixTerm {
+                fix_binding,
+                inner_binding,
+                body,
+            })) => Self {
+                ctrl: Ctrl::Value(Value::MFix(MFix {
+                    fix_binding,
+                    inner_binding,
+                    body,
+                    env: self.env.global,
                 })),
                 env: Default::default(),
                 cont,

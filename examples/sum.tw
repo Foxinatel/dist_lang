@@ -1,7 +1,7 @@
-let len = fix |f : List -> Int|( |list: List| (
+let len = fix f |list: List|: Int (
     match list
         | Cons lst => 1 + (f lst.1)
         | Nil n => 0
-))
+)
 in
 let list = Cons <3, Cons <4, Nil <>>> in (len list)

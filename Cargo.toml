@@ -5,8 +5,14 @@ edition = "2024"
 
 [dependencies]
 ariadne = "0.5.0"
-chumsky = { version = "1.0.0-alpha.8", features = [ "memoization" ] }
+chumsky = { version = "1.0.0-alpha.7", features = [ "memoization", "nightly" ] }
 im = "15.1.0"
 logos = "0.15.0"
 malachite = "0.4.16"
+mimalloc = "0.1.43"
 rayon = "1.10.0"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"

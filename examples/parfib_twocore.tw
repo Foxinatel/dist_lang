@@ -1,11 +1,9 @@
-let box fib = box fix |fib: Int -> Int|(
-    |n: Int|(
-        if n < 2 then n
-        else
-            let b = fib (n - 2) in
-            let a = fib (n - 1) in
-            (a + b)
-    )
+let box fib = box fix fib |n: Int|: Int (
+    if n < 2 then n
+    else
+        let b = fib (n - 2) in
+        let a = fib (n - 1) in
+        (a + b)
 )
 in
 let box fib29 = box (fib 29) in

@@ -19,8 +19,8 @@ pub enum Value {
     List(List),
     SumType(SumType),
     Box(Bx),
-    Func(Func),
-    Fix(Func),
+    Fix(Fix),
+    MFix(MFix),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -42,10 +42,19 @@ pub struct Bx {
 }
 
 #[derive(Clone, Debug)]
-pub struct Func {
-    pub binding: Ident,
+pub struct Fix {
+    pub fix_binding: Ident,
+    pub inner_binding: Ident,
     pub body: Arc<Term>,
     pub env: Env,
+}
+
+#[derive(Clone, Debug)]
+pub struct MFix {
+    pub fix_binding: Ident,
+    pub inner_binding: Ident,
+    pub body: Arc<Term>,
+    pub env: GlobalEnv,
 }
 
 impl Value {
@@ -65,8 +74,8 @@ impl Value {
         }
     }
 
-    pub fn func(self) -> Func {
-        if let Self::Func(val) = self {
+    pub fn fix(self) -> Fix {
+        if let Self::Fix(val) = self {
             val
         } else {
             todo!()
@@ -108,7 +117,7 @@ impl Value {
 
 #[derive(Clone, Debug)]
 pub enum Term {
-    NilLiteral,
+    ArrLiteral(im::Vector<Term>),
     BoolLiteral(bool),
     IntLiteral(Natural),
     Tuple(im::Vector<Term>),
@@ -120,7 +129,8 @@ pub enum Term {
     IfElse(IfElse),
     LetBinding(LetBinding),
     LetBoxBinding(LetBinding),
-    Fix(FuncTerm),
+    Fix(FixTerm),
+    MFix(FixTerm),
     UnaryMinus(UnaryMinus),
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
@@ -143,6 +153,13 @@ pub struct Env {
 #[derive(Clone, Debug)]
 pub struct FuncTerm {
     pub binding: Ident,
+    pub body: Arc<Term>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FixTerm {
+    pub fix_binding: Ident,
+    pub inner_binding: Ident,
     pub body: Arc<Term>,
 }
 

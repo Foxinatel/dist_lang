@@ -142,17 +142,23 @@ struct TypeEnvironment {
 impl Default for TypeEnvironment {
     fn default() -> Self {
         let mut sums = im::HashMap::<_, _>::default();
-        sums.insert(String::from("Option"), im::vector![
-            (String::from("Some"), Type::Int),
-            (String::from("None"), Type::Tuple(im::vector![])),
-        ]);
-        sums.insert(String::from("List"), im::vector![
-            (String::from("Nil"), Type::Tuple(im::vector![])),
-            (
-                String::from("Cons"),
-                Type::Tuple(im::vector![Type::Int, Type::Sum("List".to_owned().into())])
-            ),
-        ]);
+        sums.insert(
+            String::from("Option"),
+            im::vector![
+                (String::from("Some"), Type::Int),
+                (String::from("None"), Type::Tuple(im::vector![])),
+            ],
+        );
+        sums.insert(
+            String::from("List"),
+            im::vector![
+                (String::from("Nil"), Type::Tuple(im::vector![])),
+                (
+                    String::from("Cons"),
+                    Type::Tuple(im::vector![Type::Int, Type::Sum("List".to_owned().into())])
+                ),
+            ],
+        );
         Self {
             sum_types: sums,
             local: Default::default(),
@@ -173,7 +179,29 @@ fn type_check_impl(
     types: TypeEnvironment,
 ) -> Result<(Type, dynamics::Term), Vec<StaticError>> {
     match term.ty {
-        parser::TermType::NilLiteral(ty) => Ok((Type::List(ty.into()), dynamics::Term::NilLiteral)),
+        parser::TermType::ArrLiteral(ty, terms) => {
+            let terms = terms
+                .into_iter()
+                .map(|term| {
+                    let span = term.span;
+                    type_check_impl(term, types.clone()).and_then(|(ty_inner, term_inner)| {
+                        if ty == ty_inner {
+                            Ok(term_inner)
+                        } else {
+                            StaticError::new(
+                                span,
+                                TypeError::TypeMismatch {
+                                    expected: ty.clone(),
+                                    got: ty_inner,
+                                },
+                            )
+                            .into()
+                        }
+                    })
+                })
+                .collect::<Result<im::Vector<_>, _>>()?;
+            Ok((Type::List(ty.into()), dynamics::Term::ArrLiteral(terms)))
+        }
         parser::TermType::Tuple(terms) => {
             let (tys, terms): (im::Vector<_>, im::Vector<_>) = terms
                 .into_iter()
@@ -341,29 +369,61 @@ fn type_check_impl(
         parser::TermType::Fix(fix) => {
             let mut new_types = types.clone();
             let body_span = fix.body.span;
+            let fix_ty = Type::Func(fix.arg_type.clone().into(), fix.ret_type.clone().into());
             new_types.local.insert(
-                fix.binding.ident.clone(),
-                (fix.arg_type.clone(), fix.binding.span),
+                fix.inner_binding.ident.clone(),
+                (fix.arg_type, fix.inner_binding.span),
+            );
+            new_types.local.insert(
+                fix.fix_binding.ident.clone(),
+                (fix_ty.clone(), fix.fix_binding.span),
             );
             let (body_ty, body_term) = type_check_impl(*fix.body, new_types)?;
 
-            if !matches!(fix.arg_type, Type::Func(..)) {
-                let msg = String::from("Fix is not supported for non-functions types");
-                return StaticError::new(term.span, msg).into();
-            }
-
-            if body_ty != fix.arg_type {
+            if body_ty != fix.ret_type {
                 let err = TypeError::TypeMismatch {
-                    expected: fix.arg_type,
+                    expected: fix.ret_type,
                     got: body_ty,
                 };
                 return StaticError::new(body_span, err).into();
             }
 
             Ok((
-                fix.arg_type,
-                dynamics::Term::Fix(crate::FuncTerm {
-                    binding: fix.binding.ident.into(),
+                fix_ty,
+                dynamics::Term::Fix(crate::FixTerm {
+                    fix_binding: fix.fix_binding.ident.into(),
+                    inner_binding: fix.inner_binding.ident.into(),
+                    body: body_term.into(),
+                }),
+            ))
+        }
+        parser::TermType::MFix(fix) => {
+            let mut new_types = types.clone().remove_local();
+            let body_span = fix.body.span;
+            let fix_ty = Type::Func(fix.arg_type.clone().into(), fix.ret_type.clone().into());
+            new_types.local.insert(
+                fix.inner_binding.ident.clone(),
+                (fix.arg_type.clone(), fix.inner_binding.span),
+            );
+            new_types.global.insert(
+                fix.fix_binding.ident.clone(),
+                (fix_ty.clone(), fix.fix_binding.span),
+            );
+            let (body_ty, body_term) = type_check_impl(*fix.body, new_types)?;
+
+            if body_ty != fix.ret_type {
+                let err = TypeError::TypeMismatch {
+                    expected: fix.ret_type,
+                    got: body_ty,
+                };
+                return StaticError::new(body_span, err).into();
+            }
+
+            Ok((
+                Type::Mobile(fix_ty.into()),
+                dynamics::Term::MFix(crate::FixTerm {
+                    fix_binding: fix.fix_binding.ident.into(),
+                    inner_binding: fix.inner_binding.ident.into(),
                     body: body_term.into(),
                 }),
             ))
@@ -646,10 +706,13 @@ fn type_check_impl(
                 type_check_impl(arm.body, types).map(|(ty, term)| {
                     (
                         ty,
-                        (arm.ctor.ident, dynamics::Arm {
-                            bind: arm.ident.ident.into(),
-                            body: term,
-                        }),
+                        (
+                            arm.ctor.ident,
+                            dynamics::Arm {
+                                bind: arm.ident.ident.into(),
+                                body: term,
+                            },
+                        ),
                     )
                 })?
             };
@@ -683,10 +746,13 @@ fn type_check_impl(
                         return StaticError::new(body_span, err).into();
                     }
 
-                    Ok((arm.ctor.ident, dynamics::Arm {
-                        bind: arm.ident.ident.into(),
-                        body: term,
-                    }))
+                    Ok((
+                        arm.ctor.ident,
+                        dynamics::Arm {
+                            bind: arm.ident.ident.into(),
+                            body: term,
+                        },
+                    ))
                 }))
                 .collect::<Result<Vec<_>, _>>()?;
 

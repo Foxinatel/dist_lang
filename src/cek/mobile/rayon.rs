@@ -22,6 +22,12 @@ impl super::BuildableMobileValue for MobileValue {
 
         Self(val)
     }
+
+    fn with_value(val: impl FnOnce(Self) -> Value) -> Self {
+        let mobile = Self(Arc::new(OnceLock::new()));
+        mobile.0.set(val(mobile.clone())).unwrap();
+        mobile
+    }
 }
 
 impl std::fmt::Display for MobileValue {

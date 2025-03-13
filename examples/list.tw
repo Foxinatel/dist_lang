@@ -1,18 +1,14 @@
 % Regular function for generating naturals %
-let nats = fix|f: Int -> {Int}|(
-    |n: Int| (
-        let prev = if n > 0 then f (n-1) else Int{} in
-            prev :: n
-    )
+let nats = fix f |n: Int|: {Int} (
+    let prev = if n > 0 then f (n-1) else Int{} in
+        prev :: n
 )
 in
 % This function generates a list of boxes, so each index can individually be awaited %
-let nats_box = fix|f: [Int] -> {[Int]}|(
-    |n: [Int]| (
-        let box u = n in
-            let prev = if u > 0 then f (box u-1) else [Int]{} in
-                prev :: box u
-    )
+let nats_box = fix f |n: [Int]|: {[Int]} (
+    let box u = n in
+        let prev = if u > 0 then f (box u-1) else [Int]{} in
+            prev :: box u
 )
 in
 let box n = (nats_box (box 2000))[200] in <n, 24>

@@ -1,7 +1,9 @@
-#![feature(once_wait)]
 #![feature(exitcode_exit_method)]
 #![feature(fn_traits)]
 #![feature(unboxed_closures)]
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::time::Instant;
 
@@ -102,6 +104,10 @@ fn main() {
     while state.finish().is_none() {
         state = state.step();
     }
+    let c4 = Instant::now();
+    
     println!("{}", state.finish().unwrap());
     println!("{}", state.env);
+
+    println!("Execution done in {:?}", c4 - c3);
 }

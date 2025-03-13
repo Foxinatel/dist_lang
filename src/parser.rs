@@ -114,6 +114,8 @@ pub(super) enum Token<'a> {
     Else,
     #[token("fix")]
     Fix,
+    #[token("mfix")]
+    MFix,
     #[token("true")]
     True,
     #[token("false")]
@@ -122,7 +124,7 @@ pub(super) enum Token<'a> {
 
 #[derive(Debug)]
 pub enum TermType {
-    NilLiteral(types::Type),
+    ArrLiteral(types::Type, Box<[Term]>),
     Tuple(Box<[Term]>),
     BoolLiteral(bool),
     IntLiteral(Natural),
@@ -135,7 +137,8 @@ pub enum TermType {
     IfElse(IfElse),
     LetBinding(LetBinding),
     LetBoxBinding(LetBinding),
-    Fix(Func),
+    Fix(Fix),
+    MFix(Fix),
     UnaryMinus(Box<Term>),
     BinaryPrimitive(BinaryPrimitive),
     Append(Append),
@@ -157,6 +160,15 @@ pub struct Term {
 pub struct Func {
     pub binding: Ident,
     pub arg_type: types::Type,
+    pub body: Box<Term>,
+}
+
+#[derive(Debug)]
+pub struct Fix {
+    pub fix_binding: Ident,
+    pub inner_binding: Ident,
+    pub arg_type: types::Type,
+    pub ret_type: types::Type,
     pub body: Box<Term>,
 }
 
@@ -255,6 +267,9 @@ where
         |ty: chumsky::recursive::Recursive<dyn chumsky::Parser<'_, I, types::Type, Full<'a>>>| {
             choice((
                 ty.clone()
+                    .delimited_by(just(Token::LBracket), just(Token::RBracket))
+                    .map(|ty: types::Type| types::Type::List(ty.into())),
+                ty.clone()
                     .then_ignore(just(Token::RArrow))
                     .then(ty.clone())
                     .memoized()
@@ -278,46 +293,70 @@ where
             ))
         },
     )
+    .memoized()
 }
 
 pub fn parse_term<'a, I>() -> impl Parser<'a, I, Term, Full<'a>>
 where
     I: ValueInput<'a, Token = Token<'a>, Span = SimpleSpan>,
 {
+    let parse_int = select! { Token::Integer(val) => val };
+    let parse_bool = select! {
+        Token::True => true,
+        Token::False => false,
+    };
+    let parse_ident_lower = (select! { Token::IdentLower(name) => name }).try_map_with(|v, e| {
+        Ok(Ident {
+            ident: String::from(v),
+            span: e.span(),
+        })
+    });
+    let parse_ident_upper = (select! { Token::IdentUpper(name) => name }).try_map_with(|v, e| {
+        Ok(Ident {
+            ident: String::from(v),
+            span: e.span(),
+        })
+    });
+
     recursive(|term| {
-        let parse_int = select! { Token::Integer(val) => val };
-        let parse_bool = select! {
-            Token::True => true,
-            Token::False => false,
-        };
         let parse_box = just(Token::Box).ignore_then(term.clone());
-        let parse_ident_lower =
-            (select! { Token::IdentLower(name) => name }).try_map_with(|v, e| {
-                Ok(Ident {
-                    ident: String::from(v),
-                    span: e.span(),
-                })
-            });
-        let parse_ident_upper =
-            (select! { Token::IdentUpper(name) => name }).try_map_with(|v, e| {
-                Ok(Ident {
-                    ident: String::from(v),
-                    span: e.span(),
-                })
-            });
-        let parse_func = parse_ident_lower
+
+        let parse_signature = parse_ident_lower
             .then_ignore(just(Token::Colon))
             .then(parse_type())
             .delimited_by(just(Token::Bar), just(Token::Bar))
-            .then(term.clone())
+            .memoized();
+
+        let parse_func = parse_signature
+            .clone()
+            .then(term.clone().delimited_by(just(Token::LBracket), just(Token::RBracket)).map(Box::new))
             .map(|((binding, arg_type), body)| Func {
                 binding,
                 arg_type,
-                body: Box::new(body),
+                body,
             });
+
+        let parse_fix_body = parse_ident_lower
+            .then(parse_signature)
+            .then_ignore(just(Token::Colon))
+            .then(parse_type())
+            .then(term.clone().map(Box::new))
+            .map(
+                |(((fix_binding, (inner_binding, arg_type)), ret_type), body)| Fix {
+                    fix_binding,
+                    inner_binding,
+                    arg_type,
+                    ret_type,
+                    body,
+                },
+            )
+            .memoized();
         let parse_appl = term
             .clone()
-            .then(term.clone().delimited_by(just(Token::LBracket), just(Token::RBracket)))
+            .then(
+                term.clone()
+                    .delimited_by(just(Token::LBracket), just(Token::RBracket)),
+            )
             .map(|(func, arg)| Application {
                 func: Box::new(func),
                 arg: Box::new(arg),
@@ -432,36 +471,50 @@ where
                 ctor,
                 term: Box::new(term),
             });
+        let parse_ascription = term
+            .clone()
+            .memoized()
+            .then_ignore(just(Token::As))
+            .then(parse_type());
+        let parse_tuple = term
+            .clone()
+            .separated_by(just(Token::Comma))
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket));
+        let parse_tuple_index = term
+            .clone()
+            .then_ignore(just(Token::Dot))
+            .then(select! { Token::Integer(ind) => ind})
+            .memoized();
+        let parse_arr = parse_type()
+            .then_ignore(just(Token::LBrace))
+            .then(
+                term.clone()
+                    .separated_by(just(Token::Comma))
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(just(Token::RBrace));
 
         choice((
             parse_ctor.map(TermType::Ctor),
-            term.clone()
-                .memoized()
-                .then_ignore(just(Token::As))
-                .then(parse_type())
-                .map(|(term, ty)| TermType::Ascription(Box::new(term), ty)),
-            term.clone()
-                .separated_by(just(Token::Comma))
-                .collect::<Vec<_>>()
-                .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket))
-                .map(|terms| TermType::Tuple(terms.into())),
-            term.clone()
-                .then_ignore(just(Token::Dot))
-                .then(select! { Token::Integer(ind) => ind})
-                .memoized()
-                .map_with(|(tup, ind), extra| {
-                    TermType::TupleIndex(TupleIndex {
-                        tup: Box::new(tup),
-                        index: (ind, extra.span()),
-                    })
-                }),
+            parse_ascription.map(|(term, ty)| TermType::Ascription(Box::new(term), ty)),
+            parse_tuple.map(|terms| TermType::Tuple(terms.into())),
+            parse_tuple_index.map_with(|(tup, ind), extra| {
+                TermType::TupleIndex(TupleIndex {
+                    tup: Box::new(tup),
+                    index: (ind, extra.span()),
+                })
+            }),
             parse_let_box.map(TermType::LetBoxBinding),
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
             parse_match.map(|(term, arms)| TermType::Match(Box::new(term), arms)),
             just(Token::Fix)
-                .ignore_then(parse_func.clone())
+                .ignore_then(parse_fix_body.clone())
                 .map(TermType::Fix),
+            just(Token::MFix)
+                .ignore_then(parse_fix_body)
+                .map(TermType::MFix),
             parse_func.map(TermType::Function),
             parse_box.map(|t| TermType::Box(Box::new(t))),
             parse_binary_primitive.map(TermType::BinaryPrimitive),
@@ -478,10 +531,7 @@ where
             term.clone()
                 .delimited_by(just(Token::LBracket), just(Token::RBracket))
                 .map(|inner| TermType::Bracketed(Box::new(inner))),
-            parse_type()
-                .then_ignore(just(Token::LBrace))
-                .then_ignore(just(Token::RBrace))
-                .map(TermType::NilLiteral),
+            parse_arr.map(|(ty, terms)| TermType::ArrLiteral(ty, terms.into_boxed_slice())),
             parse_ident_lower.map(TermType::Variable),
             parse_bool.map(TermType::BoolLiteral),
             parse_int.map(TermType::IntLiteral),
@@ -514,7 +564,10 @@ pub fn generate_static_ast(input: &str) -> Result<Term, Vec<StaticError>> {
 
     let token_stream = Stream::from_iter(tokens).map((0..input.len()).into(), |x| x);
 
-    let (output, errs) = parse_term().parse(token_stream).into_output_errors();
+    let (output, errs) = parse_term()
+        .then_ignore(end())
+        .parse(token_stream)
+        .into_output_errors();
 
     if !errs.is_empty() {
         return Err(errs
