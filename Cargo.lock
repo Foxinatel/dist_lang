@@ -46,6 +46,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
+name = "bincode"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
+dependencies = [
+ "bincode_derive",
+ "serde",
+ "unty",
+]
+
+[[package]]
+name = "bincode_derive"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
+dependencies = [
+ "virtue",
+]
+
+[[package]]
 name = "bitmaps"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -161,6 +181,7 @@ dependencies = [
  "bitmaps",
  "rand_core",
  "rand_xoshiro",
+ "serde",
  "sized-chunks",
  "typenum",
  "version_check",
@@ -244,8 +265,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fbdf9cb251732db30a7200ebb6ae5d22fe8e11397364416617d2c2cf0c51cb5"
 dependencies = [
  "malachite-base",
+ "malachite-float",
  "malachite-nz",
  "malachite-q",
+ "serde",
 ]
 
 [[package]]
@@ -261,6 +284,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "malachite-float"
+version = "0.4.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af9d20db1c73759c1377db7b27575df6f2eab7368809dd62c0a715dc1bcc39f7"
+dependencies = [
+ "itertools",
+ "malachite-base",
+ "malachite-nz",
+ "malachite-q",
+ "serde",
+]
+
+[[package]]
 name = "malachite-nz"
 version = "0.4.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -269,6 +305,7 @@ dependencies = [
  "itertools",
  "libm",
  "malachite-base",
+ "serde",
 ]
 
 [[package]]
@@ -280,6 +317,7 @@ dependencies = [
  "itertools",
  "malachite-base",
  "malachite-nz",
+ "serde",
 ]
 
 [[package]]
@@ -474,12 +512,14 @@ name = "twoes"
 version = "0.1.0"
 dependencies = [
  "ariadne",
+ "bincode",
  "chumsky",
  "im",
  "logos",
  "malachite",
  "mimalloc",
  "rayon",
+ "serde",
 ]
 
 [[package]]
@@ -507,10 +547,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
+name = "unty"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "virtue"
+version = "0.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "windows-sys"

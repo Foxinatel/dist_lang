@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use malachite::{Integer, Natural};
+use serde::{Deserialize, Serialize};
 
 pub type Ident = Arc<str>;
 
@@ -115,7 +116,7 @@ impl Value {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Term {
     ArrLiteral(im::Vector<Term>),
     BoolLiteral(bool),
@@ -150,70 +151,70 @@ pub struct Env {
     pub local: im::HashMap<Ident, Value>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FuncTerm {
     pub binding: Ident,
     pub body: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FixTerm {
     pub fix_binding: Ident,
     pub inner_binding: Ident,
     pub body: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Application {
     pub func: Arc<Term>,
     pub arg: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IfElse {
     pub cond: Arc<Term>,
     pub if_true: Arc<Term>,
     pub if_false: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LetBinding {
     pub binding: Ident,
     pub expr: Arc<Term>,
     pub body: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BxTerm {
     pub body: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Append {
     pub list: Arc<Term>,
     pub item: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Index {
     pub list: Arc<Term>,
     pub index: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Slice {
     pub list: Arc<Term>,
     pub lower: Option<Arc<Term>>,
     pub upper: Option<Arc<Term>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IndexTuple {
     pub tuple: Arc<Term>,
     pub index: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -227,29 +228,29 @@ pub enum BinaryOp {
     GreaterThanOrEqual,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BinaryPrimitive {
     pub op: BinaryOp,
     pub lhs: Arc<Term>,
     pub rhs: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UnaryMinus(pub Arc<Term>);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Tag {
     pub tag: Arc<String>,
     pub body: Arc<Term>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Match {
     pub expr: Arc<Term>,
     pub arms: Arc<[(String, Arm)]>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Arm {
     pub bind: Ident,
     pub body: Term,

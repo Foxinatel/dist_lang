@@ -83,29 +83,56 @@ fn unwrap_static<T>(result: Result<T, Vec<StaticError>>, file: &str, src: &str) 
 }
 
 fn main() {
-    let file = std::env::args().nth(1).expect("file expected as first arg");
-    let src = std::fs::read_to_string(&file).unwrap();
+    let config = bincode::config::standard()
+        .with_big_endian()
+        .with_variable_int_encoding();
 
-    let c1 = Instant::now();
+    let mut args = std::env::args().skip(1);
+    let ast_dynamic = match &*args.next().unwrap() {
+        "--file" => {
+            let file = args.next().expect("file expected as first arg");
+            let src = std::fs::read_to_string(&file).unwrap();
 
-    let ast_static = unwrap_static(parser::generate_static_ast(&src), &file, &src);
+            let c1 = Instant::now();
 
-    let c2 = Instant::now();
-    println!("Parsing done in {:?}", c2 - c1);
+            let ast_static = unwrap_static(parser::generate_static_ast(&src), &file, &src);
 
-    let ast_dynamic = unwrap_static(types::type_check(ast_static), &file, &src);
+            let c2 = Instant::now();
+            println!("Parsing done in {:?}", c2 - c1);
 
-    let c3 = Instant::now();
-    println!("Static pass done in {:?}", c3 - c2);
+            let ast_dynamic = unwrap_static(types::type_check(ast_static), &file, &src);
+
+            let c3 = Instant::now();
+            println!("Static pass done in {:?}", c3 - c2);
+
+            bincode::serde::encode_into_std_write(
+                &ast_dynamic,
+                &mut std::fs::File::create_new("./.tmp").unwrap(),
+                config,
+            )
+            .unwrap();
+
+            ast_dynamic
+        }
+        "--ir" => {
+            let file = args.next().expect("file expected as first arg");
+
+            bincode::serde::decode_from_std_read(&mut std::fs::File::open(file).unwrap(), config)
+                .unwrap()
+        }
+        _ => todo!(),
+    };
 
     rayon::ThreadPoolBuilder::new().build_global().unwrap();
+
+    let c3 = Instant::now();
 
     let mut state = Cek::new(ast_dynamic);
     while state.finish().is_none() {
         state = state.step();
     }
     let c4 = Instant::now();
-    
+
     println!("{}", state.finish().unwrap());
     println!("{}", state.env);
 

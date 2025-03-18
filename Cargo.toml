@@ -5,12 +5,14 @@ edition = "2024"
 
 [dependencies]
 ariadne = "0.5.0"
+bincode = { version = "2.0.1", features = [ "serde" ] }
 chumsky = { version = "1.0.0-alpha.7", features = [ "memoization", "nightly" ] }
-im = "15.1.0"
+im = { version = "15.1.0", features = [ "serde" ] }
 logos = "0.15.0"
-malachite = "0.4.16"
+malachite = { version = "0.4.16", features = [ "serde", "enable_serde" ] }
 mimalloc = "0.1.43"
 rayon = "1.10.0"
+serde = { version = "1.0.219", features = [ "derive", "rc" ] }
 
 [profile.release]
 codegen-units = 1
