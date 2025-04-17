@@ -12,7 +12,7 @@ use crate::{
 pub enum Type {
     Bool,
     Int,
-    Tuple(im::Vector<Type>),
+    Tuple(imbl::Vector<Type>),
     Mobile(Rc<Type>),
     List(Rc<Type>),
     Func(Rc<Type>, Rc<Type>),
@@ -134,28 +134,28 @@ impl std::fmt::Display for TypeError {
 
 #[derive(Clone)]
 struct TypeEnvironment {
-    sum_types: im::HashMap<String, im::Vector<(String, Type)>>,
-    local: im::HashMap<String, (Type, SimpleSpan)>,
-    global: im::HashMap<String, (Type, SimpleSpan)>,
+    sum_types: imbl::HashMap<String, imbl::Vector<(String, Type)>>,
+    local: imbl::HashMap<String, (Type, SimpleSpan)>,
+    global: imbl::HashMap<String, (Type, SimpleSpan)>,
 }
 
 impl Default for TypeEnvironment {
     fn default() -> Self {
-        let mut sums = im::HashMap::<_, _>::default();
+        let mut sums = imbl::HashMap::<_, _>::default();
         sums.insert(
             String::from("Option"),
-            im::vector![
+            imbl::vector![
                 (String::from("Some"), Type::Int),
-                (String::from("None"), Type::Tuple(im::vector![])),
+                (String::from("None"), Type::Tuple(imbl::vector![])),
             ],
         );
         sums.insert(
             String::from("List"),
-            im::vector![
-                (String::from("Nil"), Type::Tuple(im::vector![])),
+            imbl::vector![
+                (String::from("Nil"), Type::Tuple(imbl::vector![])),
                 (
                     String::from("Cons"),
-                    Type::Tuple(im::vector![Type::Int, Type::Sum("List".to_owned().into())])
+                    Type::Tuple(imbl::vector![Type::Int, Type::Sum("List".to_owned().into())])
                 ),
             ],
         );
@@ -199,17 +199,33 @@ fn type_check_impl(
                         }
                     })
                 })
-                .collect::<Result<im::Vector<_>, _>>()?;
-            Ok((Type::List(ty.into()), dynamics::Term::ArrLiteral(terms)))
+                .collect::<Result<imbl::Vector<_>, _>>()?;
+            let terms = terms
+                .into_iter()
+                .fold(dynamics::Term::NilLiteral, |acc, term| {
+                    dynamics::Term::Append(dynamics::Append {
+                        list: acc.into(),
+                        item: term.into(),
+                    })
+                });
+            Ok((Type::List(ty.into()), terms))
         }
         parser::TermType::Tuple(terms) => {
-            let (tys, terms): (im::Vector<_>, im::Vector<_>) = terms
+            let (tys, terms): (imbl::Vector<_>, imbl::Vector<_>) = terms
                 .into_iter()
                 .map(|term| type_check_impl(term, types.clone()))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .unzip();
-            Ok((Type::Tuple(tys), dynamics::Term::Tuple(terms)))
+            let terms = terms
+                .into_iter()
+                .fold(dynamics::Term::NilLiteral, |acc, term| {
+                    dynamics::Term::Append(dynamics::Append {
+                        list: acc.into(),
+                        item: term.into(),
+                    })
+                });
+            Ok((Type::Tuple(tys), terms))
         }
         parser::TermType::BoolLiteral(val) => Ok((Type::Bool, dynamics::Term::BoolLiteral(val))),
         parser::TermType::IntLiteral(val) => Ok((Type::Int, dynamics::Term::IntLiteral(val))),
@@ -242,8 +258,9 @@ fn type_check_impl(
 
             Ok((
                 Type::Func(func.arg_type.into(), body_ty.into()),
-                dynamics::Term::Function(dynamics::FuncTerm {
-                    binding: func.binding.ident.into(),
+                dynamics::Term::Fix(dynamics::FixTerm {
+                    fix_binding: "".into(),
+                    inner_binding: func.binding.ident.into(),
                     body: body_term.into(),
                 }),
             ))

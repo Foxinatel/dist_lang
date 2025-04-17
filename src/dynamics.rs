@@ -14,10 +14,10 @@ pub type MobileValue = Arc<dyn Mobile + 'static>;
 
 #[derive(Clone, Debug)]
 pub enum Value {
-    Tuple(Tuple),
+    // Tuple(Tuple),
     Int(Integer),
     Bool(bool),
-    List(List),
+    Arr(Arr),
     SumType(SumType),
     Box(Bx),
     Fix(Fix),
@@ -25,10 +25,7 @@ pub enum Value {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct List(pub im::Vector<Value>);
-
-#[derive(Clone, Debug)]
-pub struct Tuple(pub im::Vector<Value>);
+pub struct Arr(pub imbl::Vector<Value>);
 
 #[derive(Clone, Debug)]
 pub struct SumType {
@@ -83,24 +80,8 @@ impl Value {
         }
     }
 
-    pub fn bx(self) -> Bx {
-        if let Self::Box(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    pub fn list(self) -> List {
-        if let Self::List(val) = self {
-            val
-        } else {
-            todo!()
-        }
-    }
-
-    pub fn tuple(self) -> Tuple {
-        if let Self::Tuple(val) = self {
+    pub fn arr(self) -> Arr {
+        if let Self::Arr(val) = self {
             val
         } else {
             todo!()
@@ -118,14 +99,12 @@ impl Value {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Term {
-    ArrLiteral(im::Vector<Term>),
+    NilLiteral,
     BoolLiteral(bool),
     IntLiteral(Natural),
-    Tuple(im::Vector<Term>),
     Box(BxTerm),
     LocalVariable(Ident),
     GlobalVariable(Ident),
-    Function(FuncTerm),
     Application(Application),
     IfElse(IfElse),
     LetBinding(LetBinding),
@@ -143,19 +122,20 @@ pub enum Term {
     Length(Arc<Term>),
 }
 
-pub type GlobalEnv = im::HashMap<Ident, MobileValue>;
+pub type GlobalEnv = imbl::HashMap<Ident, MobileValue>;
+pub type LocalEnv = imbl::HashMap<Ident, Value>;
 
 #[derive(Default, Clone, Debug)]
 pub struct Env {
     pub global: GlobalEnv,
-    pub local: im::HashMap<Ident, Value>,
+    pub local: LocalEnv,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FuncTerm {
-    pub binding: Ident,
-    pub body: Arc<Term>,
-}
+// #[derive(Clone, Debug, Serialize, Deserialize)]
+// pub struct FuncTerm {
+//     pub binding: Ident,
+//     pub body: Arc<Term>,
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FixTerm {

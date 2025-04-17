@@ -50,7 +50,12 @@ impl super::BuildableMobileValue for MobileValue {
 
 impl std::fmt::Display for MobileValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        let ll = self.0.get().unwrap();
+        if let Some(val) = LazyLock::get(ll) {
+            write!(f, "{}", val)
+        } else {
+            write!(f, "uninitialised")
+        }
     }
 }
 

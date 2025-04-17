@@ -1,11 +1,12 @@
 #![feature(exitcode_exit_method)]
 #![feature(fn_traits)]
 #![feature(unboxed_closures)]
+#![feature(lazy_get)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use std::time::Instant;
+use std::{path::PathBuf, time::Instant};
 
 use ariadne::*;
 
@@ -54,7 +55,12 @@ impl<T, I: FromIterator<StaticError>> From<StaticError> for Result<T, I> {
     }
 }
 
-fn unwrap_static<T>(result: Result<T, Vec<StaticError>>, file: &str, src: &str) -> T {
+fn unwrap_static<T>(
+    result: Result<T, Vec<StaticError>>,
+    file: impl AsRef<std::path::Path>,
+    src: &str,
+) -> T {
+    let file = file.as_ref().to_string_lossy();
     result.unwrap_or_else(|errs| {
         let mut colours = ColorGenerator::default();
         let mut display = Report::build(
@@ -83,6 +89,8 @@ fn unwrap_static<T>(result: Result<T, Vec<StaticError>>, file: &str, src: &str) 
 }
 
 fn main() {
+    // println!("{:?}", thread::available_parallelism());
+
     let config = bincode::config::standard()
         .with_big_endian()
         .with_variable_int_encoding();
@@ -90,7 +98,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let ast_dynamic = match &*args.next().unwrap() {
         "--file" => {
-            let file = args.next().expect("file expected as first arg");
+            let file = PathBuf::from(args.next().expect("file expected as first arg"));
             let src = std::fs::read_to_string(&file).unwrap();
 
             let c1 = Instant::now();
@@ -107,7 +115,14 @@ fn main() {
 
             bincode::serde::encode_into_std_write(
                 &ast_dynamic,
-                &mut std::fs::File::create_new("./.tmp").unwrap(),
+                &mut std::fs::File::create_new(args.next().map(PathBuf::from).unwrap_or_else(
+                    || {
+                        let mut file = file;
+                        file.set_extension("ir");
+                        file
+                    },
+                ))
+                .unwrap(),
                 config,
             )
             .unwrap();
@@ -133,8 +148,8 @@ fn main() {
     }
     let c4 = Instant::now();
 
-    println!("{}", state.finish().unwrap());
-    println!("{}", state.env);
+    // println!("{}", state.finish().unwrap());
+    // println!("{}", state.env);
 
     println!("Execution done in {:?}", c4 - c3);
 }

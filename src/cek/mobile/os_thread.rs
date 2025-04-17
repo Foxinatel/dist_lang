@@ -44,9 +44,6 @@ impl std::ops::Deref for MobileValue {
     type Target = Value;
 
     fn deref(&self) -> &Self::Target {
-        if let Some(v) = self.0.get() {
-            return v;
-        }
         self.0.wait()
     }
 }

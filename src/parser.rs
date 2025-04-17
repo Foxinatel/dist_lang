@@ -1,8 +1,10 @@
+use std::str::FromStr;
+
 use chumsky::{
     input::{Stream, ValueInput},
     prelude::*,
 };
-use malachite::{Natural, num::conversion::traits::FromSciString};
+use malachite::Natural;
 
 use crate::{StaticError, types};
 
@@ -44,7 +46,7 @@ pub(super) enum Token<'a> {
     IdentLower(&'a str),
     #[regex("[A-Z][a-zA-Z0-9_]*")]
     IdentUpper(&'a str),
-    #[regex("[0-9]+", |lex| Natural::from_sci_string(lex.slice()))]
+    #[regex("[0-9]+", |lex| Natural::from_str(lex.slice()).ok())]
     Integer(Natural),
     #[token(",")]
     Comma,
@@ -329,7 +331,11 @@ where
 
         let parse_func = parse_signature
             .clone()
-            .then(term.clone().delimited_by(just(Token::LBracket), just(Token::RBracket)).map(Box::new))
+            .then(
+                term.clone()
+                    .delimited_by(just(Token::LBracket), just(Token::RBracket))
+                    .map(Box::new),
+            )
             .map(|((binding, arg_type), body)| Func {
                 binding,
                 arg_type,

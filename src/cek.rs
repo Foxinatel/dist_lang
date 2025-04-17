@@ -5,25 +5,28 @@ use mobile::MobileValueBuilder as _;
 
 use crate::dynamics::*;
 
-type MobileValueBuilder = mobile::OsThreadMobileValueBuilder;
+// type MobileValueBuilder = mobile::SerialMobileValueBuilder;
+// type MobileValueBuilder = mobile::LazyMobileValueBuilder;
+// type MobileValueBuilder = mobile::OsThreadMobileValueBuilder;
+type MobileValueBuilder = mobile::RayonMobileValueBuilder;
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Tuple(vals) => write!(
-                f,
-                "<{}>",
-                vals.0
-                    .iter()
-                    .map(|val| format!("{val}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
             Value::Int(val) => write!(f, "{val:?}"),
             Value::Bool(val) => write!(f, "{val:?}"),
             Value::Box(_) => write!(f, "box (...)"),
-            Value::Fix(fix) => write!(f, "fix {} -> (...)", "TODO"),
-            Value::List(vec) => write!(
+            Value::Fix(fix) => write!(
+                f,
+                "fix {} {} -> (...)",
+                if fix.fix_binding.is_empty() {
+                    "!"
+                } else {
+                    &fix.fix_binding
+                },
+                fix.inner_binding
+            ),
+            Value::Arr(vec) => write!(
                 f,
                 "{{{}}}",
                 vec.0
@@ -33,7 +36,16 @@ impl std::fmt::Display for Value {
                     .join(", ")
             ),
             Value::SumType(sum) => write!(f, "{} {:?}", sum.ctor, sum.inner),
-            Value::MFix(fix) => write!(f, "mfix {} -> (...)", "TODO"),
+            Value::MFix(fix) => write!(
+                f,
+                "mfix {} {} -> (...)",
+                if fix.fix_binding.is_empty() {
+                    "!"
+                } else {
+                    &fix.fix_binding
+                },
+                fix.inner_binding
+            ),
         }
     }
 }
@@ -65,16 +77,6 @@ impl std::fmt::Display for Env {
 
 #[derive(Debug)]
 enum Kont {
-    Tuple {
-        env: Env,
-        done: im::Vector<Value>,
-        todo: im::Vector<Term>,
-    },
-    Arr {
-        env: Env,
-        done: im::Vector<Value>,
-        todo: im::Vector<Term>,
-    },
     Bind(Ident, Term, Env),
     BindBox(Ident, Term, Env),
     Arg(Term, Env),
@@ -88,11 +90,11 @@ enum Kont {
     BinaryPrimitive(BinaryOp, Term, Env),
     BinaryPrimitiveVal(BinaryOp, Value),
     Append(Term, Env),
-    Push(List),
+    Push(Arr),
     ResolvList(Term, Env),
-    Index(List),
+    Index(Arr),
     IndexTuple(u64),
-    Match(im::HashMap<String, Arm>, Env),
+    Match(imbl::HashMap<String, Arm>, Env),
     Tag(Arc<String>),
     Len,
     Slice1 {
@@ -101,12 +103,12 @@ enum Kont {
         env: Env,
     },
     Slice2 {
-        list: List,
+        list: Arr,
         upper: Option<Term>,
         env: Env,
     },
     Slice3 {
-        list: List,
+        list: Arr,
         lower: u64,
     },
 }
@@ -265,7 +267,7 @@ impl Cek {
                     }
                     // Dynamic: Append-2
                     Kont::Append(term, env) => {
-                        cont.push(Kont::Push(val.list()));
+                        cont.push(Kont::Push(val.arr()));
                         Self {
                             ctrl: Ctrl::Term(term),
                             env,
@@ -276,14 +278,14 @@ impl Cek {
                     Kont::Push(mut list) => {
                         list.0.push_back(val);
                         Self {
-                            ctrl: Ctrl::Value(Value::List(list)),
+                            ctrl: Ctrl::Value(Value::Arr(list)),
                             env: Default::default(),
                             cont,
                         }
                     }
                     // Dynamic: Index-2
                     Kont::ResolvList(term, env) => {
-                        cont.push(Kont::Index(val.list()));
+                        cont.push(Kont::Index(val.arr()));
                         Self {
                             ctrl: Ctrl::Term(term),
                             env,
@@ -300,63 +302,9 @@ impl Cek {
                             cont,
                         }
                     }
-                    Kont::Tuple {
-                        env,
-                        mut done,
-                        mut todo,
-                    } => {
-                        done.push_back(val);
-                        if let Some(nxt) = todo.pop_front() {
-                            // Dynamic: Tup-2
-                            cont.push(Kont::Tuple {
-                                env: env.clone(),
-                                done,
-                                todo,
-                            });
-                            Self {
-                                ctrl: Ctrl::Term(nxt),
-                                env,
-                                cont,
-                            }
-                        } else {
-                            // Dynamic: Tup
-                            Self {
-                                ctrl: Ctrl::Value(Value::Tuple(Tuple(done))),
-                                env: Default::default(),
-                                cont,
-                            }
-                        }
-                    }
-                    Kont::Arr {
-                        env,
-                        mut done,
-                        mut todo,
-                    } => {
-                        done.push_back(val);
-                        if let Some(nxt) = todo.pop_front() {
-                            // Dynamic: Arr-2
-                            cont.push(Kont::Arr {
-                                env: env.clone(),
-                                done,
-                                todo,
-                            });
-                            Self {
-                                ctrl: Ctrl::Term(nxt),
-                                env,
-                                cont,
-                            }
-                        } else {
-                            // Dynamic: Arr
-                            Self {
-                                ctrl: Ctrl::Value(Value::List(List(done))),
-                                env: Default::default(),
-                                cont,
-                            }
-                        }
-                    }
                     // Dynamic: TupIndex
                     Kont::IndexTuple(ind) => {
-                        let Tuple(vals) = val.tuple();
+                        let Arr(vals) = val.arr();
                         let val = vals[ind as usize].clone();
                         Self {
                             ctrl: Ctrl::Value(val),
@@ -385,14 +333,14 @@ impl Cek {
                         cont,
                     },
                     Kont::Len => Self {
-                        ctrl: Ctrl::Value(Value::Int(val.list().0.len().into())),
+                        ctrl: Ctrl::Value(Value::Int(val.arr().0.len().into())),
                         env: Default::default(),
                         cont,
                     },
                     Kont::Slice1 { lower, upper, env } => {
                         if let Some(lower) = lower {
                             cont.push(Kont::Slice2 {
-                                list: val.list(),
+                                list: val.arr(),
                                 upper,
                                 env: env.clone(),
                             });
@@ -403,7 +351,7 @@ impl Cek {
                             }
                         } else if let Some(upper) = upper {
                             cont.push(Kont::Slice3 {
-                                list: val.list(),
+                                list: val.arr(),
                                 lower: 0,
                             });
                             Self {
@@ -412,9 +360,9 @@ impl Cek {
                                 cont,
                             }
                         } else {
-                            let List(vals) = val.list();
+                            let Arr(vals) = val.arr();
                             Self {
-                                ctrl: Ctrl::Value(Value::List(List(vals.clone()))),
+                                ctrl: Ctrl::Value(Value::Arr(Arr(vals.clone()))),
                                 env,
                                 cont,
                             }
@@ -429,71 +377,35 @@ impl Cek {
                                 cont,
                             }
                         } else {
-                            let List(mut vals) = list;
+                            let Arr(mut vals) = list;
                             let ind: usize = (&val.int()).try_into().unwrap();
                             Self {
-                                ctrl: Ctrl::Value(Value::List(List(vals.slice(ind..)))),
+                                ctrl: Ctrl::Value(Value::Arr(Arr(vals.slice(ind..)))),
                                 env,
                                 cont,
                             }
                         }
                     }
                     Kont::Slice3 {
-                        list: List(mut vals),
+                        list: Arr(mut vals),
                         lower,
                     } => {
                         let upper: usize = (&val.int()).try_into().unwrap();
                         let slice = vals.slice((lower as usize)..upper);
                         Self {
-                            ctrl: Ctrl::Value(Value::List(List(slice))),
+                            ctrl: Ctrl::Value(Value::Arr(Arr(slice))),
                             env: Default::default(),
                             cont,
                         }
                     }
                 }
             }
-            Ctrl::Term(Term::Tuple(mut terms)) => {
-                if let Some(fst) = terms.pop_front() {
-                    // Dynamic: Tup-1
-                    cont.push(Kont::Tuple {
-                        env: self.env.clone(),
-                        done: Default::default(),
-                        todo: terms,
-                    });
-                    Self {
-                        ctrl: Ctrl::Term(fst),
-                        env: self.env,
-                        cont,
-                    }
-                } else {
-                    // Dynamic: Unit
-                    Self {
-                        ctrl: Ctrl::Value(Value::Tuple(Tuple(im::Vector::new()))),
-                        env: Default::default(),
-                        cont,
-                    }
-                }
-            }
-            Ctrl::Term(Term::ArrLiteral(mut terms)) => {
-                if let Some(fst) = terms.pop_front() {
-                    // Dynamic: Arr-1
-                    cont.push(Kont::Arr {
-                        env: self.env.clone(),
-                        done: Default::default(),
-                        todo: terms,
-                    });
-                    Self {
-                        ctrl: Ctrl::Term(fst),
-                        env: self.env,
-                        cont,
-                    }
-                } else {
-                    // Dynamic: Nil
-                    Self {
-                        ctrl: Ctrl::Value(Value::List(Default::default())),
-                        env: Default::default(),
-                        cont,
-                    }
+            Ctrl::Term(Term::NilLiteral) => {
+                // Dynamic: Nil
+                Self {
+                    ctrl: Ctrl::Value(Value::Arr(Default::default())),
+                    env: Default::default(),
+                    cont,
                 }
             }
             // Dynamic: IntLiteral
@@ -517,17 +429,6 @@ impl Cek {
                 env: Default::default(),
                 cont,
             },
-            // Dynamic: Func
-            Ctrl::Term(Term::Function(FuncTerm { binding, body })) => Self {
-                ctrl: Ctrl::Value(Value::Fix(Fix {
-                    fix_binding: "".into(),
-                    inner_binding: binding,
-                    body,
-                    env: self.env,
-                })),
-                env: Default::default(),
-                cont,
-            },
             // Dynamic: Fix
             Ctrl::Term(Term::Fix(FixTerm {
                 fix_binding,
@@ -543,7 +444,7 @@ impl Cek {
                 env: Default::default(),
                 cont,
             },
-            // Dynamic: Fix
+            // Dynamic: MFix
             Ctrl::Term(Term::MFix(FixTerm {
                 fix_binding,
                 inner_binding,
