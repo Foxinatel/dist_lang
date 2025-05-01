@@ -3,3 +3,4 @@
 /report
 /examples/bin
 /**/*.ir
+.vscode

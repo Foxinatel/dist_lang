@@ -35,7 +35,7 @@ impl std::fmt::Display for Value {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Value::SumType(sum) => write!(f, "{} {:?}", sum.ctor, sum.inner),
+            Value::SumType(sum) => write!(f, "{} {}", sum.ctor, sum.inner),
             Value::MFix(fix) => write!(
                 f,
                 "mfix {} {} -> (...)",

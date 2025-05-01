@@ -8,8 +8,6 @@ use crate::cek::Value;
 #[derive(Debug, Clone)]
 pub struct MobileValue(Arc<OnceLock<Value>>);
 
-impl super::Mobile for MobileValue {}
-
 impl super::BuildableMobileValue for MobileValue {
     fn compute(mut cek: crate::cek::Cek) -> Self {
         while cek.finish().is_none() {

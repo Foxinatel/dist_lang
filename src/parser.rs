@@ -261,21 +261,52 @@ pub struct BinaryPrimitive {
 
 type Full<'a> = extra::Full<Rich<'a, Token<'a>>, (), ()>;
 
+// pub fn parse_type<'a, I>() -> impl Clone + Parser<'a, I, types::Type, Full<'a>>
+// where
+//     I: ValueInput<'a, Token = Token<'a>, Span = SimpleSpan>,
+// {
+//     recursive(
+//         |ty: chumsky::recursive::Recursive<dyn chumsky::Parser<'_, I, types::Type, Full<'a>>>| {
+//             choice((
+//                 ty.clone()
+//                     .delimited_by(just(Token::LBracket), just(Token::RBracket))
+//                     .map(|ty: types::Type| types::Type::List(ty.into())),
+//                 ty.clone()
+//                     .then_ignore(just(Token::RArrow))
+//                     .then(ty.clone())
+//                     .memoized()
+//                     .map(|(l, r)| types::Type::Func(l.into(), r.into())),
+//                 ty.clone()
+//                     .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket))
+//                     .map(|ty: types::Type| types::Type::Mobile(ty.into())),
+//                 ty.clone()
+//                     .delimited_by(just(Token::LBrace), just(Token::RBrace))
+//                     .map(|ty: types::Type| types::Type::List(ty.into())),
+//                 ty.clone()
+//                     .separated_by(just(Token::Comma))
+//                     .collect::<Vec<_>>()
+//                     .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket))
+//                     .map(|tys| types::Type::Tuple(tys.into())),
+//                 select! {
+//                     Token::IdentUpper("Bool") => types::Type::Bool,
+//                     Token::IdentUpper("Int") => types::Type::Int,
+//                     Token::IdentUpper(name) => types::Type::Sum(name.to_string().into()),
+//                 },
+//             ))
+//         },
+//     )
+// }
+
 pub fn parse_type<'a, I>() -> impl Clone + Parser<'a, I, types::Type, Full<'a>>
 where
     I: ValueInput<'a, Token = Token<'a>, Span = SimpleSpan>,
 {
     recursive(
         |ty: chumsky::recursive::Recursive<dyn chumsky::Parser<'_, I, types::Type, Full<'a>>>| {
-            choice((
+            let atom = choice((
                 ty.clone()
                     .delimited_by(just(Token::LBracket), just(Token::RBracket))
                     .map(|ty: types::Type| types::Type::List(ty.into())),
-                ty.clone()
-                    .then_ignore(just(Token::RArrow))
-                    .then(ty.clone())
-                    .memoized()
-                    .map(|(l, r)| types::Type::Func(l.into(), r.into())),
                 ty.clone()
                     .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket))
                     .map(|ty: types::Type| types::Type::Mobile(ty.into())),
@@ -292,10 +323,19 @@ where
                     Token::IdentUpper("Int") => types::Type::Int,
                     Token::IdentUpper(name) => types::Type::Sum(name.to_string().into()),
                 },
-            ))
+            ));
+
+            atom.clone()
+                .then(just(Token::RArrow).ignore_then(ty.clone()).or_not())
+                .map(|(a, b)| {
+                    if let Some(tgt) = b {
+                        types::Type::Func(a.into(), tgt.into())
+                    } else {
+                        a
+                    }
+                })
         },
     )
-    .memoized()
 }
 
 pub fn parse_term<'a, I>() -> impl Parser<'a, I, Term, Full<'a>>
@@ -323,24 +363,24 @@ where
     recursive(|term| {
         let parse_box = just(Token::Box).ignore_then(term.clone());
 
+        let bracketed = term
+            .clone()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket));
+
         let parse_signature = parse_ident_lower
             .then_ignore(just(Token::Colon))
             .then(parse_type())
-            .delimited_by(just(Token::Bar), just(Token::Bar))
-            .memoized();
+            .delimited_by(just(Token::Bar), just(Token::Bar));
 
-        let parse_func = parse_signature
-            .clone()
-            .then(
-                term.clone()
-                    .delimited_by(just(Token::LBracket), just(Token::RBracket))
-                    .map(Box::new),
-            )
-            .map(|((binding, arg_type), body)| Func {
-                binding,
-                arg_type,
-                body,
-            });
+        let parse_func =
+            parse_signature
+                .clone()
+                .then(bracketed)
+                .map(|((binding, arg_type), body)| Func {
+                    binding,
+                    arg_type,
+                    body: Box::new(body),
+                });
 
         let parse_fix_body = parse_ident_lower
             .then(parse_signature)
@@ -355,19 +395,8 @@ where
                     ret_type,
                     body,
                 },
-            )
-            .memoized();
-        let parse_appl = term
-            .clone()
-            .then(
-                term.clone()
-                    .delimited_by(just(Token::LBracket), just(Token::RBracket)),
-            )
-            .map(|(func, arg)| Application {
-                func: Box::new(func),
-                arg: Box::new(arg),
-            })
-            .memoized();
+            );
+
         let parse_if_else = just(Token::If)
             .ignore_then(term.clone())
             .then_ignore(just(Token::Then))
@@ -402,63 +431,6 @@ where
                 expr: Box::new(expr),
                 body: Box::new(body),
             });
-        let parse_binary_primitive = term
-            .clone()
-            .then(select! {
-                Token::Add => BinaryOp::Add,
-                Token::Minus => BinaryOp::Subtract,
-                Token::Multiply => BinaryOp::Multiply,
-                Token::Divide => BinaryOp::Divide,
-                Token::EqualTo => BinaryOp::Equal,
-                Token::NotEqualTo => BinaryOp::NotEqual,
-                Token::LAngleBracket => BinaryOp::LessThan,
-                Token::RAngleBracket => BinaryOp::GreaterThan,
-                Token::LessThanOrEqual => BinaryOp::LessThanOrEqual,
-                Token::GreaterThanOrEqual => BinaryOp::GreaterThanOrEqual,
-            })
-            .then(term.clone())
-            .map(|((lhs, op), rhs)| BinaryPrimitive {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            })
-            .memoized();
-        let parse_append = term
-            .clone()
-            .then_ignore(just(Token::Append))
-            .then(term.clone())
-            .map(|(list, item)| Append {
-                list: Box::new(list),
-                item: Box::new(item),
-            })
-            .memoized();
-        let parse_index = term
-            .clone()
-            .then(
-                term.clone()
-                    .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket)),
-            )
-            .map(|(list, index)| Index {
-                list: Box::new(list),
-                index: Box::new(index),
-            })
-            .memoized();
-        let parse_slice = term
-            .clone()
-            .then(
-                (term
-                    .clone()
-                    .or_not()
-                    .then_ignore(just(Token::Range))
-                    .then(term.clone().or_not()))
-                .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket)),
-            )
-            .map(|(list, (lower, upper))| Slice {
-                list: Box::new(list),
-                lower: lower.map(Box::new),
-                upper: upper.map(Box::new),
-            })
-            .memoized();
         let parse_match = just(Token::Match)
             .ignore_then(term.clone())
             .then_ignore(just(Token::Bar))
@@ -477,21 +449,11 @@ where
                 ctor,
                 term: Box::new(term),
             });
-        let parse_ascription = term
-            .clone()
-            .memoized()
-            .then_ignore(just(Token::As))
-            .then(parse_type());
         let parse_tuple = term
             .clone()
             .separated_by(just(Token::Comma))
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LAngleBracket), just(Token::RAngleBracket));
-        let parse_tuple_index = term
-            .clone()
-            .then_ignore(just(Token::Dot))
-            .then(select! { Token::Integer(ind) => ind})
-            .memoized();
         let parse_arr = parse_type()
             .then_ignore(just(Token::LBrace))
             .then(
@@ -501,16 +463,9 @@ where
             )
             .then_ignore(just(Token::RBrace));
 
-        choice((
+        let atom = choice((
             parse_ctor.map(TermType::Ctor),
-            parse_ascription.map(|(term, ty)| TermType::Ascription(Box::new(term), ty)),
             parse_tuple.map(|terms| TermType::Tuple(terms.into())),
-            parse_tuple_index.map_with(|(tup, ind), extra| {
-                TermType::TupleIndex(TupleIndex {
-                    tup: Box::new(tup),
-                    index: (ind, extra.span()),
-                })
-            }),
             parse_let_box.map(TermType::LetBoxBinding),
             parse_let.map(TermType::LetBinding),
             parse_if_else.map(TermType::IfElse),
@@ -523,14 +478,9 @@ where
                 .map(TermType::MFix),
             parse_func.map(TermType::Function),
             parse_box.map(|t| TermType::Box(Box::new(t))),
-            parse_binary_primitive.map(TermType::BinaryPrimitive),
             term.clone()
                 .delimited_by(just(Token::Bar), just(Token::Bar))
                 .map(|term| TermType::Length(Box::new(term))),
-            parse_appl.map(TermType::Application),
-            parse_slice.map(TermType::Slice),
-            parse_index.map(TermType::Index),
-            parse_append.map(TermType::Append),
             just(Token::Minus)
                 .ignore_then(term.clone())
                 .map(|t| TermType::UnaryMinus(Box::new(t))),
@@ -548,6 +498,104 @@ where
                 span: e.span(),
             })
         })
+        .boxed();
+
+        let parse_appl = atom
+            .clone()
+            .then(
+                term.clone()
+                    .delimited_by(just(Token::LBracket), just(Token::RBracket)),
+            )
+            .map(|(func, arg)| Application {
+                func: Box::new(func),
+                arg: Box::new(arg),
+            });
+
+        let parse_binary_primitive = atom
+            .clone()
+            .then(select! {
+                Token::Add => BinaryOp::Add,
+                Token::Minus => BinaryOp::Subtract,
+                Token::Multiply => BinaryOp::Multiply,
+                Token::Divide => BinaryOp::Divide,
+                Token::EqualTo => BinaryOp::Equal,
+                Token::NotEqualTo => BinaryOp::NotEqual,
+                Token::LAngleBracket => BinaryOp::LessThan,
+                Token::RAngleBracket => BinaryOp::GreaterThan,
+                Token::LessThanOrEqual => BinaryOp::LessThanOrEqual,
+                Token::GreaterThanOrEqual => BinaryOp::GreaterThanOrEqual,
+            })
+            .then(term.clone())
+            .map(|((lhs, op), rhs)| BinaryPrimitive {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            });
+
+        let parse_append = atom
+            .clone()
+            .then_ignore(just(Token::Append))
+            .then(term.clone())
+            .map(|(list, item)| Append {
+                list: Box::new(list),
+                item: Box::new(item),
+            });
+
+        let parse_index = atom
+            .clone()
+            .then(
+                term.clone()
+                    .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket)),
+            )
+            .map(|(list, index)| Index {
+                list: Box::new(list),
+                index: Box::new(index),
+            });
+
+        let parse_slice = atom
+            .clone()
+            .then(
+                (term
+                    .clone()
+                    .or_not()
+                    .then_ignore(just(Token::Range))
+                    .then(term.clone().or_not()))
+                .delimited_by(just(Token::LSqBracket), just(Token::RSqBracket)),
+            )
+            .map(|(list, (lower, upper))| Slice {
+                list: Box::new(list),
+                lower: lower.map(Box::new),
+                upper: upper.map(Box::new),
+            });
+
+        let parse_ascription = atom.clone().then_ignore(just(Token::As)).then(parse_type());
+
+        let parse_tuple_index = atom
+            .clone()
+            .then_ignore(just(Token::Dot))
+            .then(select! { Token::Integer(ind) => ind});
+
+        choice((
+            // parse_ascription.map(|(term, ty)| TermType::Ascription(Box::new(term), ty)),
+            parse_tuple_index.map_with(|(tup, ind), extra| {
+                TermType::TupleIndex(TupleIndex {
+                    tup: Box::new(tup),
+                    index: (ind, extra.span()),
+                })
+            }),
+            parse_appl.map(TermType::Application),
+            parse_binary_primitive.map(TermType::BinaryPrimitive),
+            // parse_slice.map(TermType::Slice),
+            // parse_index.map(TermType::Index),
+            // parse_append.map(TermType::Append),
+        ))
+        .try_map_with(|v, e| {
+            Ok(Term {
+                ty: v,
+                span: e.span(),
+            })
+        })
+        .or(atom)
     })
 }
 

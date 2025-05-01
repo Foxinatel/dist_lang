@@ -1,0 +1,24 @@
+let isqrt = |s: Int| (
+    if s <= 1 then s else
+    let x0 = s / 2 in
+    let x1 = (x0 + s / x0) / 2 in
+    let update = fix f |x: <Int, Int>|: Int (
+        if ((x.1) >= x.0) then x.0 else
+        f (<x.1, (x.1 + s / x.1) / 2>)
+    ) in
+    update(<x0, x1>)
+)
+in
+let make_tree = fix f |bounds: <Int, Int>|: Tree1 (
+    let lower = bounds.0 in
+    let upper = bounds.1 in
+    if lower >= upper then
+        Leaf1 isqrt(lower)
+    else
+        let mid = (lower + upper) / 2 in
+        Branch1 <
+            f(<lower, mid - 1>),
+            isqrt(mid),
+            f(<mid + 1, upper>)
+        >
+) in make_tree(<1, 65535>)

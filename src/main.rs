@@ -115,7 +115,7 @@ fn main() {
 
             bincode::serde::encode_into_std_write(
                 &ast_dynamic,
-                &mut std::fs::File::create_new(args.next().map(PathBuf::from).unwrap_or_else(
+                &mut std::fs::File::create(args.next().map(PathBuf::from).unwrap_or_else(
                     || {
                         let mut file = file;
                         file.set_extension("ir");
@@ -148,7 +148,7 @@ fn main() {
     }
     let c4 = Instant::now();
 
-    // println!("{}", state.finish().unwrap());
+    println!("{}", state.finish().unwrap());
     // println!("{}", state.env);
 
     println!("Execution done in {:?}", c4 - c3);

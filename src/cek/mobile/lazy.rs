@@ -29,8 +29,6 @@ impl FnOnce<()> for MaybeEvalCek {
 #[derive(Debug, Clone)]
 pub struct MobileValue(Arc<OnceLock<LazyLock<Value, MaybeEvalCek>>>);
 
-impl super::Mobile for MobileValue {}
-
 impl super::BuildableMobileValue for MobileValue {
     fn compute(cek: crate::cek::Cek) -> Self {
         Self(Arc::new(OnceLock::from(LazyLock::new(

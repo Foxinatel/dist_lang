@@ -5,8 +5,6 @@ use crate::cek::{Cek, Value};
 #[derive(Clone, Debug)]
 pub struct MobileValue(Arc<OnceLock<Value>>);
 
-impl super::Mobile for MobileValue {}
-
 impl super::BuildableMobileValue for MobileValue {
     fn compute(mut term: Cek) -> Self {
         let val = Arc::new(OnceLock::new());

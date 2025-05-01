@@ -16,7 +16,7 @@ pub enum Type {
     Mobile(Rc<Type>),
     List(Rc<Type>),
     Func(Rc<Type>, Rc<Type>),
-    Sum(Rc<String>),
+    Sum(Rc<str>),
 }
 
 impl std::fmt::Display for Type {
@@ -155,7 +155,66 @@ impl Default for TypeEnvironment {
                 (String::from("Nil"), Type::Tuple(imbl::vector![])),
                 (
                     String::from("Cons"),
-                    Type::Tuple(imbl::vector![Type::Int, Type::Sum("List".to_owned().into())])
+                    Type::Tuple(imbl::vector![
+                        Type::Int,
+                        Type::Sum("List".to_owned().into())
+                    ])
+                ),
+            ],
+        );
+        sums.insert(
+            String::from("Tree1"),
+            imbl::vector![
+                (String::from("Leaf1"), Type::Int),
+                (
+                    String::from("Branch1"),
+                    Type::Tuple(imbl::vector![
+                        Type::Sum("Tree1".to_owned().into()),
+                        Type::Int,
+                        Type::Sum("Tree1".to_owned().into())
+                    ])
+                ),
+            ],
+        );
+        sums.insert(
+            String::from("Tree2"),
+            imbl::vector![
+                (String::from("Leaf2"), Type::Mobile(Type::Int.into())),
+                (
+                    String::from("Branch2"),
+                    Type::Tuple(imbl::vector![
+                        Type::Sum("Tree2".to_owned().into()),
+                        Type::Mobile(Type::Int.into()),
+                        Type::Sum("Tree2".to_owned().into())
+                    ])
+                ),
+            ],
+        );
+        sums.insert(
+            String::from("Tree3"),
+            imbl::vector![
+                (String::from("Leaf3"), Type::Int),
+                (
+                    String::from("Branch3"),
+                    Type::Tuple(imbl::vector![
+                        Type::Mobile(Type::Sum("Tree3".to_owned().into()).into()),
+                        Type::Int,
+                        Type::Mobile(Type::Sum("Tree3".to_owned().into()).into())
+                    ])
+                ),
+            ],
+        );
+        sums.insert(
+            String::from("Tree4"),
+            imbl::vector![
+                (String::from("Leaf4"), Type::Mobile(Type::Int.into())),
+                (
+                    String::from("Branch4"),
+                    Type::Tuple(imbl::vector![
+                        Type::Mobile(Type::Sum("Tree4".to_owned().into()).into()),
+                        Type::Mobile(Type::Int.into()),
+                        Type::Mobile(Type::Sum("Tree4".to_owned().into()).into())
+                    ])
                 ),
             ],
         );
@@ -650,7 +709,7 @@ fn type_check_impl(
             }
 
             Ok((
-                Type::Sum(Rc::new(ty_name.clone())),
+                Type::Sum(Rc::from(ty_name.clone())),
                 dynamics::Term::Tag(dynamics::Tag {
                     tag: ctor.ctor.ident.into(),
                     body: term.into(),

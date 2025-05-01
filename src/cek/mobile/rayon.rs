@@ -55,5 +55,3 @@ impl std::ops::Deref for MobileValue {
         self.0.wait()
     }
 }
-
-impl super::Mobile for MobileValue {}

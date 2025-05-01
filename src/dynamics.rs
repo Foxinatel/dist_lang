@@ -10,6 +10,11 @@ pub trait Mobile:
 {
 }
 
+impl<T> Mobile for T where
+    T: std::fmt::Display + std::fmt::Debug + std::ops::Deref<Target = Value> + Sync + Send
+{
+}
+
 pub type MobileValue = Arc<dyn Mobile + 'static>;
 
 #[derive(Clone, Debug)]
