@@ -115,13 +115,11 @@ fn main() {
 
             bincode::serde::encode_into_std_write(
                 &ast_dynamic,
-                &mut std::fs::File::create(args.next().map(PathBuf::from).unwrap_or_else(
-                    || {
-                        let mut file = file;
-                        file.set_extension("ir");
-                        file
-                    },
-                ))
+                &mut std::fs::File::create(args.next().map(PathBuf::from).unwrap_or_else(|| {
+                    let mut file = file;
+                    file.set_extension("ir");
+                    file
+                }))
                 .unwrap(),
                 config,
             )
@@ -138,18 +136,19 @@ fn main() {
         _ => todo!(),
     };
 
-    rayon::ThreadPoolBuilder::new().build_global().unwrap();
-
     let c3 = Instant::now();
 
     let mut state = Cek::new(ast_dynamic);
-    while state.finish().is_none() {
-        state = state.step();
-    }
-    let c4 = Instant::now();
+    rayon::scope(|_| {
+        while state.finish().is_none() {
+            state = state.step();
+        }
 
-    println!("{}", state.finish().unwrap());
-    // println!("{}", state.env);
+        println!("{}", state.finish().unwrap());
+        // println!("{}", state.env);
+    });
+
+    let c4 = Instant::now();
 
     println!("Execution done in {:?}", c4 - c3);
 }

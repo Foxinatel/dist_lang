@@ -136,12 +136,6 @@ pub struct Env {
     pub local: LocalEnv,
 }
 
-// #[derive(Clone, Debug, Serialize, Deserialize)]
-// pub struct FuncTerm {
-//     pub binding: Ident,
-//     pub body: Arc<Term>,
-// }
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FixTerm {
     pub fix_binding: Ident,

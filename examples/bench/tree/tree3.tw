@@ -1,29 +1,30 @@
-type Tree = Branch <Tree, Int, Tree> | Leaf Int in
-let expensive_black_box = |n: Int| (
+type Tree = Branch <[Tree], Int, [Tree]> | Leaf Int in
+let box expensive_black_box = box |n: Int| (
     let discard = (fix f |s: Int|: Int (
         if s <= 1 then s else
         f(s - 1) + f(s - 2)        
     ))(5) in 2 * n
 ) in
-let make_tree = fix f |bounds: <Int, Int>|: Tree (
+let box make_tree = mfix f |box_bounds: [<Int, Int>]|: Tree (
+    let box bounds = box_bounds in
     if bounds.0 >= bounds.1 then
         Leaf expensive_black_box bounds.0
     else
-        let mid = (bounds.0 + bounds.1) / 2 in
+        let box mid = box (bounds.0 + bounds.1) / 2 in
         Branch <
-            f (<bounds.0, mid - 1>),
+            box f (box <bounds.0, mid - 1>),
             expensive_black_box mid,
-            f (<mid + 1, bounds.1>)
+            box f (box <mid + 1, bounds.1>)
         >
 ) in
 let left = |input: Tree| (
     match input
-        | Branch node => node.0
+        | Branch node => let box n = node.0 in n
         | Leaf n => Leaf n
 ) in
 let right = |input: Tree| (
     match input
-        | Branch node => node.2
+        | Branch node => let box n = node.2 in n
         | Leaf n => Leaf n
 ) in
 let get = |input: Tree| (
@@ -36,12 +37,14 @@ let find = |tgt: Int| (
         match input
             | Leaf n => <n == tgt, 0>
             | Branch node =>
+                let box n1 = node.0 in
+                let box n2 = node.2 in
                 if node.1 == tgt then <true, 0> else (
                 if tgt < node.1 then
-                    let res = f(node.0) in
+                    let res = f(n1) in
                     <res.0, res.1 * 2>
                 else
-                    let res = f(node.2) in
+                    let res = f(n2) in
                     <res.0, (res.1 * 2) + 1> 
                 )
 
@@ -49,19 +52,13 @@ let find = |tgt: Int| (
 ) in
 let full_sum = fix f |input: Tree|: Int (
     match input
-        | Branch node => (f node.0) + node.1 + (f node.2) 
+        | Branch node =>
+            let box n1 = node.0 in
+            let box n2 = node.2 in
+                (f n1) + node.1 + (f n2) 
         | Leaf n => n
 ) in
 let part_sum = |input: Tree| (
     full_sum (left (right (left input))) + full_sum (right (left (right input)))
 ) in
-let tree = make_tree (<1, 262143>) in find 2136 tree
-
-%
-five different benchmarking programs:
-- tree
-- full_sum tree
-- part_sum tree
-- get(left(left(right(right(left(right(tree)))))))
-- tree
-%
+let tree = make_tree (box <1, 262143>) in find 2136 tree

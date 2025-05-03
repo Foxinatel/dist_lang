@@ -133,97 +133,11 @@ impl std::fmt::Display for TypeError {
 }
 
 #[derive(Clone)]
+#[derive(Default)]
 struct TypeEnvironment {
-    sum_types: imbl::HashMap<String, imbl::Vector<(String, Type)>>,
+    sum_types: std::collections::HashMap<String, Vec<(String, Type)>>,
     local: imbl::HashMap<String, (Type, SimpleSpan)>,
     global: imbl::HashMap<String, (Type, SimpleSpan)>,
-}
-
-impl Default for TypeEnvironment {
-    fn default() -> Self {
-        let mut sums = imbl::HashMap::<_, _>::default();
-        sums.insert(
-            String::from("Option"),
-            imbl::vector![
-                (String::from("Some"), Type::Int),
-                (String::from("None"), Type::Tuple(imbl::vector![])),
-            ],
-        );
-        sums.insert(
-            String::from("List"),
-            imbl::vector![
-                (String::from("Nil"), Type::Tuple(imbl::vector![])),
-                (
-                    String::from("Cons"),
-                    Type::Tuple(imbl::vector![
-                        Type::Int,
-                        Type::Sum("List".to_owned().into())
-                    ])
-                ),
-            ],
-        );
-        sums.insert(
-            String::from("Tree1"),
-            imbl::vector![
-                (String::from("Leaf1"), Type::Int),
-                (
-                    String::from("Branch1"),
-                    Type::Tuple(imbl::vector![
-                        Type::Sum("Tree1".to_owned().into()),
-                        Type::Int,
-                        Type::Sum("Tree1".to_owned().into())
-                    ])
-                ),
-            ],
-        );
-        sums.insert(
-            String::from("Tree2"),
-            imbl::vector![
-                (String::from("Leaf2"), Type::Mobile(Type::Int.into())),
-                (
-                    String::from("Branch2"),
-                    Type::Tuple(imbl::vector![
-                        Type::Sum("Tree2".to_owned().into()),
-                        Type::Mobile(Type::Int.into()),
-                        Type::Sum("Tree2".to_owned().into())
-                    ])
-                ),
-            ],
-        );
-        sums.insert(
-            String::from("Tree3"),
-            imbl::vector![
-                (String::from("Leaf3"), Type::Int),
-                (
-                    String::from("Branch3"),
-                    Type::Tuple(imbl::vector![
-                        Type::Mobile(Type::Sum("Tree3".to_owned().into()).into()),
-                        Type::Int,
-                        Type::Mobile(Type::Sum("Tree3".to_owned().into()).into())
-                    ])
-                ),
-            ],
-        );
-        sums.insert(
-            String::from("Tree4"),
-            imbl::vector![
-                (String::from("Leaf4"), Type::Mobile(Type::Int.into())),
-                (
-                    String::from("Branch4"),
-                    Type::Tuple(imbl::vector![
-                        Type::Mobile(Type::Sum("Tree4".to_owned().into()).into()),
-                        Type::Mobile(Type::Int.into()),
-                        Type::Mobile(Type::Sum("Tree4".to_owned().into()).into())
-                    ])
-                ),
-            ],
-        );
-        Self {
-            sum_types: sums,
-            local: Default::default(),
-            global: Default::default(),
-        }
-    }
 }
 
 impl TypeEnvironment {
@@ -912,6 +826,13 @@ fn type_check_impl(
     }
 }
 
-pub fn type_check(term: Term) -> Result<dynamics::Term, Vec<StaticError>> {
-    type_check_impl(term, TypeEnvironment::default()).map(|(_, term)| term)
+pub fn type_check(program: parser::Program) -> Result<dynamics::Term, Vec<StaticError>> {
+    type_check_impl(
+        program.term,
+        TypeEnvironment {
+            sum_types: program.typedefs,
+            ..Default::default()
+        },
+    )
+    .map(|(_, term)| term)
 }

@@ -158,6 +158,8 @@ impl Cek {
                     Kont::BindBox(ident, term, mut env) => {
                         match val {
                             Value::Box(bx) => {
+                                // println!("{:?} Spawning new task for {bx:#?} with name {ident}", rayon::current_thread_index());
+                                
                                 let mv = MobileValueBuilder::compute(Self::from_box(bx));
 
                                 // Continue on our current thread
@@ -207,8 +209,9 @@ impl Cek {
                             fix_binding,
                             inner_binding,
                             body,
-                            mut env,
+                            env,
                         } = fx.clone();
+                        let mut env = env.clone();
                         env.local.insert(fix_binding, Value::Fix(fx));
                         env.local.insert(inner_binding, val);
                         Self {
@@ -475,6 +478,7 @@ impl Cek {
             }
             // Dynamic: Global
             Ctrl::Term(Term::GlobalVariable(ident)) => {
+                // println!("{:?} Getting: {ident}", rayon::current_thread_index());
                 let Some(mobile) = self.env.global.get(&ident).cloned() else {
                     panic!(
                         "Could not find global variable {ident} in scope {}",

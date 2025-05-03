@@ -1,0 +1,67 @@
+type Tree = Branch <[Tree], [Int], [Tree]> | Leaf [Int] in
+let box expensive_black_box = box |n: Int| (
+    let discard = (fix f |s: Int|: Int (
+        if s <= 1 then s else
+        f(s - 1) + f(s - 2)        
+    ))(5) in 2 * n
+) in
+let box make_tree = mfix f |box_bounds: [<Int, Int>]|: Tree (
+    let box bounds = box_bounds in
+    if bounds.0 >= bounds.1 then
+        Leaf box expensive_black_box bounds.0
+    else
+        let box mid = box (bounds.0 + bounds.1) / 2 in
+        Branch <
+            box f (box <bounds.0, mid - 1>),
+            box expensive_black_box mid,
+            box f (box <mid + 1, bounds.1>)
+        >
+) in
+let left = |input: Tree| (
+    match input
+        | Branch node => let box n = node.0 in n
+        | Leaf n => Leaf n
+) in
+let right = |input: Tree| (
+    match input
+        | Branch node => let box n = node.2 in n
+        | Leaf n => Leaf n
+) in
+let get = |input: Tree| (
+    let box v = match input
+        | Branch node => node.1
+        | Leaf n => n
+    in v
+) in
+let find = |tgt: Int| (
+    fix f |input: Tree|: <Bool, Int> (
+        match input
+            | Leaf n => let box v = n in <v == tgt, 0>
+            | Branch node =>
+                let box n1 = node.0 in
+                let box n2 = node.2 in
+                let box v = node.1 in
+                if v == tgt then <true, 0> else (
+                if tgt < v then
+                    let res = f(n1) in
+                    <res.0, v * 2>
+                else
+                    let res = f(n2) in
+                    <res.0, (v * 2) + 1> 
+                )
+
+    )
+) in
+let full_sum = fix f |input: Tree|: Int (
+    match input
+        | Branch node =>
+            let box n1 = node.0 in
+            let box n2 = node.2 in
+            let box v = node.1 in
+                (f n1) + v + (f n2)
+        | Leaf n => let box v = n in v
+) in
+let part_sum = |input: Tree| (
+    full_sum (left (right (left input))) + full_sum (right (left (right input)))
+) in
+let tree = make_tree (box <1, 262143>) in find 2136 tree

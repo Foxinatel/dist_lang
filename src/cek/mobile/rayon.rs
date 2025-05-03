@@ -47,11 +47,24 @@ impl std::ops::Deref for MobileValue {
         if let Some(v) = self.0.get() {
             return v;
         }
+        // println!(
+        //     "{:?}: Variable not yet computed",
+        //     rayon::current_thread_index()
+        // );
         while let Some(Yield::Executed) = rayon::yield_now() {
             if let Some(v) = self.0.get() {
                 return v;
             }
         }
-        self.0.wait()
+        // println!(
+        //     "{:?}: No work - Suspending",
+        //     rayon::current_thread_index()
+        // );
+        let a = self.0.wait();
+        // println!(
+        //     "{:?}: Computed - Resuming",
+        //     rayon::current_thread_index()
+        // );
+        a
     }
 }
